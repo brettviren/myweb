@@ -1,9 +1,10 @@
+import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
-from myweb.config import load
+from myweb.config import DEFAULT_EMACS_LOAD_PATH, DEFAULT_HUGO, expand, load
 
 MYWEB_TOML = """\
 [taxon.posts]
@@ -80,3 +81,34 @@ def add_post(cfg, slug, title=None, draft="false", audience="both", visibility="
         )
     )
     return path
+
+
+LAYOUTS = {
+    "baseof.html": '<html><body>{{ block "main" . }}{{ end }}</body></html>',
+    "home.html": '{{ define "main" }}{{ range site.RegularPages }}<a href="{{ .RelPermalink }}">{{ .Title }}</a>{{ end }}{{ end }}',
+    "section.html": '{{ define "main" }}{{ range .Pages }}<a href="{{ .RelPermalink }}">{{ .Title }}</a>{{ end }}{{ end }}',
+    "page.html": '{{ define "main" }}{{ .Content }}<a href="{{ site.Home.RelPermalink }}">home</a>{{ end }}',
+}
+HUGO_TOML = 'baseURL = "http://example.org/~me/"\ndisableKinds = ["taxonomy", "term"]\n[security]\nallowContent = ["! ^text/html$"]\n'
+
+
+def have_hugo():
+    try:
+        return subprocess.run([*DEFAULT_HUGO, "version"], capture_output=True).returncode == 0
+    except OSError:
+        return False
+
+
+def have_ox_hugo():
+    return shutil.which("emacs") and all(expand(p).is_dir() for p in DEFAULT_EMACS_LOAD_PATH)
+
+
+@pytest.fixture
+def hugo_site(cfg, site):
+    (site / "layouts").mkdir()
+    for name, text in LAYOUTS.items():
+        (site / "layouts" / name).write_text(text)
+    (site / "config" / "_default").mkdir(parents=True)
+    (site / "config" / "_default" / "hugo.toml").write_text(HUGO_TOML)
+    cfg.emacs_load_path = [expand(p) for p in DEFAULT_EMACS_LOAD_PATH]
+    return cfg

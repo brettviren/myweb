@@ -7,22 +7,13 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import export, hugo, orgsource
+from . import access, export, hugo, orgsource, siteindex
 from .config import Config, Target, xdg_dir
 from .site import bundles
 
 
 class DeployError(Exception):
     pass
-
-
-HTACCESS = """\
-# Written by myweb: this page is protected.
-AuthType Basic
-AuthName "{name}"
-AuthUserFile {htpasswd}
-Require valid-user
-"""
 
 
 ORG_TYPE = """\
@@ -55,7 +46,7 @@ def protect(target: Target, plan: hugo.Plan, stage: Path) -> list[Path]:
         if not page.is_dir():
             raise DeployError(f"protected page {bundle.name} not found in {stage}")
         path = page / ".htaccess"
-        path.write_text(HTACCESS.format(name=bundle.name, htpasswd=Path(target.htpasswd).expanduser()))
+        path.write_text(access.htaccess(target, plan.realm[bundle.name], f"page {bundle.name}"))
         out.append(path)
     return out
 
@@ -83,6 +74,9 @@ def verify(cfg: Config, target: Target, plan: hugo.Plan, stage: Path) -> None:
     if plan.protected and not target.auth:
         names = ", ".join(b.name for b in plan.protected)
         raise DeployError(f"protected {names} built for {target.name} which lacks auth")
+    problems = siteindex.check(target, plan, stage)
+    if problems:
+        raise DeployError("search: " + "; ".join(problems))
 
 
 def rsync(src: Path, dest: str, keep: list[str]) -> str:
@@ -117,6 +111,7 @@ def build(
     log = hugo.build(cfg, plan, stage, drafts=drafts)
     sources(target, plan, stage)
     protect(target, plan, stage)
+    siteindex.write(target, plan, stage)
     verify(cfg, target, plan, stage)
     result = Result(target, stage, plan, exported=exported, log=log)
     if not sync:

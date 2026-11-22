@@ -23,6 +23,7 @@ from . import (
     server,
     setup as setting,
     site as sites,
+    siteindex,
     status as statusing,
     vcs,
     version as versioning,
@@ -35,6 +36,7 @@ ERRORS = (
     exporting.ExportError,
     hugo.HugoError,
     deploy.DeployError,
+    siteindex.SearchError,
     vcs.VcsError,
     FileExistsError,
 )

@@ -10,6 +10,7 @@ taxon or target field.  Environment variables override both.
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import tomllib
 from dataclasses import dataclass, field
@@ -23,6 +24,9 @@ DEFAULT_EMACS_LOAD_PATH = [
 ]
 SITE_CONFIG = "myweb.toml"
 RENDERS = ("ox-hugo", "hugo")
+#: Access realms when a target names none: protected pages admit any user.
+DEFAULT_REALMS = {"protected": "valid-user"}
+REALM_NAME = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 
 class ConfigError(Exception):
@@ -78,6 +82,9 @@ class Target:
     #: Media type for published org sources, set by a top .htaccess
     #: (needs AllowOverride FileInfo).  Empty to write none.
     org_type: str = "text/plain; charset=utf-8"
+    #: Access realm name to its Apache "Require" argument.  A protected
+    #: page is in the realm its #+access names, default "protected".
+    realms: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_REALMS))
 
 
 @dataclass
@@ -169,6 +176,11 @@ def _target(name: str, cfg: dict) -> Target:
     tgt.rsync = str(cfg.get("rsync", ""))
     tgt.base_url = str(cfg.get("base_url", ""))
     tgt.org_type = str(cfg.get("org_type", tgt.org_type))
+    if "realms" in cfg:
+        tgt.realms = {str(k): str(v) for k, v in cfg["realms"].items()}
+    for realm, require in tgt.realms.items():
+        if realm == "public" or not REALM_NAME.match(realm) or not require.strip():
+            raise ConfigError(f"target {name}: bad realm {realm!r} = {require!r}")
     if cfg.get("dest"):
         tgt.dest = expand(cfg["dest"])
     return tgt

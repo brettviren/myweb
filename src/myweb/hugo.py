@@ -19,6 +19,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import access, orgmeta
 from .config import Config, Target, xdg_dir
 from .site import Bundle, bundles
 
@@ -35,6 +36,9 @@ class Plan:
     included: list[Bundle] = field(default_factory=list)
     excluded: list[tuple[Bundle, str]] = field(default_factory=list)
     hidden: list[tuple[Bundle, str]] = field(default_factory=list)
+    #: Of each included bundle, by name: its meta and access realm.
+    meta: dict[str, orgmeta.Meta] = field(default_factory=dict)
+    realm: dict[str, access.Realm] = field(default_factory=dict)
 
     @property
     def protected(self) -> list[Bundle]:
@@ -52,10 +56,14 @@ def plan(cfg: Config, target: Target, drafts: bool = False) -> Plan:
             why = "protected, target has no auth"
         elif meta.draft and not drafts:
             why = "draft"
+        elif (realm := access.page_realm(target, meta)) is None:
+            why = f"access realm {meta.access} not on target"
         if why:
             result.excluded.append((bundle, why))
             continue
         result.included.append(bundle)
+        result.meta[bundle.name] = meta
+        result.realm[bundle.name] = realm
         if meta.visibility in ("unlisted", "protected"):
             result.hidden.append((bundle, meta.visibility))
     return result

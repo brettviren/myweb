@@ -1,0 +1,74 @@
+"""Who may read a page: its access realm.
+
+A realm is a name and the Apache ``Require`` that admits its readers.
+Public pages are in the "public" realm, which requires nothing.  A
+protected page is in the realm its ``#+access:`` names (default
+"protected") among the target's ``realms``, eg::
+
+    [target.work.realms]
+    protected = "valid-user"
+    dune = "user alice bob"
+
+Everything guarded is guarded by the one ``.htaccess`` text made here, so
+a page and the search index holding it always admit the same readers.
+Search keeps one index per realm and never mixes realms in a file, so a
+reader admitted to one realm learns nothing of another.  Unlisted pages
+are in the public realm but are in no index: being found only by their
+URL is what unlisted means.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+
+from .config import Target
+from .orgmeta import Meta
+
+PUBLIC = "public"
+
+HTACCESS = """\
+# Written by myweb: {what} is in access realm "{realm}".
+AuthType Basic
+AuthName "{realm}"
+AuthUserFile {htpasswd}
+Require {require}
+"""
+
+
+@dataclass(frozen=True)
+class Realm:
+    name: str
+    #: The Apache Require argument, "" for the public realm.
+    require: str = ""
+
+    @property
+    def public(self) -> bool:
+        return not self.require
+
+
+def page_realm(target: Target, meta: Meta) -> Realm | None:
+    """The realm of a page on TARGET, None if TARGET has no such realm."""
+    if not meta.access:
+        return Realm(PUBLIC)
+    if meta.access not in target.realms:
+        return None
+    return Realm(meta.access, target.realms[meta.access])
+
+
+def index_realm(target: Target, meta: Meta) -> Realm | None:
+    """The realm whose search index holds a page, None for no index."""
+    if meta.visibility == "unlisted":
+        return None
+    return page_realm(target, meta)
+
+
+def htaccess(target: Target, realm: Realm, what: str) -> str:
+    if realm.public:
+        raise ValueError("the public realm needs no .htaccess")
+    if not target.htpasswd:
+        raise ValueError(f"target {target.name} has no htpasswd for realm {realm.name}")
+    return HTACCESS.format(
+        what=what, realm=realm.name, require=realm.require,
+        htpasswd=Path(target.htpasswd).expanduser(),
+    )

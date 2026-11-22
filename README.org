@@ -44,6 +44,41 @@ from the ~source~ param myweb cascades).  A top ~.htaccess~ serves ~.org~
 as the target's ~org_type~ (default ~text/plain; charset=utf-8~, needs
 ~AllowOverride FileInfo~; set ~org_type = ""~ to omit it).
 
+* Search and access realms
+
+Site search runs in the reader's browser over static JSON indexes that
+~myweb build~ writes after hugo, so a reader can search exactly what the
+web server lets them fetch.  There is no server side to trust.
+
+Every page is in one access realm: ~public~, or for a protected page the
+realm its ~#+access:~ names (default ~protected~) from the target's
+~realms~, each an Apache ~Require~:
+
+#+begin_src toml
+[target.work.realms]
+protected = "valid-user"       # the default when none are given
+dune = "user alice bob"        # eg a collaboration's talks
+#+end_src
+
+A page whose realm the target lacks is not built for it.  One function
+(~access.htaccess~) writes the ~.htaccess~ for both a realm's pages and its
+index, so they always admit the same readers, and all use ~AuthName~ = the
+realm so one login covers the realm.
+
+- ~search/index.json~ :: public pages only
+- ~search/<realm>/~ :: the realm's ~.htaccess~, its ~index.json~, and a copy
+  of the search page that loads the public and the realm's index
+- unlisted pages :: in no index
+
+No index holds two realms, so a reader of ~dune~ learns nothing of
+~protected~ and vice versa; one with both searches each.  The build fails
+if any index holds a page of another realm or a realm index is not guarded
+like its pages.  The public search page links each realm's search, so
+realm names are public.  Unlisted and protected pages were already kept
+out of lists, RSS and the sitemap.
+
+Without JavaScript the search page offers the section indices instead.
+
 * Commands
 
 #+begin_example

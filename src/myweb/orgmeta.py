@@ -73,6 +73,13 @@ class Meta:
         return self.keywords.get("visibility", "public").strip() or "public"
 
     @property
+    def access(self) -> str:
+        """The access realm of a protected item, "" for others."""
+        if self.visibility != "protected":
+            return ""
+        return self.keywords.get("access", "protected").strip() or "protected"
+
+    @property
     def deadline(self) -> date | None:
         dates = [t.deadline for t in self.todos if t.deadline and t.state != "DONE"]
         return min(dates) if dates else None
