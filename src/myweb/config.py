@@ -1,0 +1,213 @@
+"""Configuration.
+
+Two layers describe a site.  The site dataset carries ``myweb.toml`` with
+its taxa and deployment targets, so that every clone of the dataset builds
+the same way.  The user's ``~/.config/myweb/config.toml`` says where the
+site is on this host, how to run hugo and Emacs, and may override any
+taxon or target field.  Environment variables override both.
+"""
+
+from __future__ import annotations
+
+import os
+import shlex
+import tomllib
+from dataclasses import dataclass, field
+from pathlib import Path
+
+DEFAULT_HUGO = ["uvx", "--from", "hugo==0.170.1", "hugo"]
+DEFAULT_EMACS_LOAD_PATH = [
+    "~/.config/emacs/straight/build/org",
+    "~/.config/emacs/straight/build/tomelr",
+    "~/.config/emacs/straight/build/ox-hugo",
+]
+SITE_CONFIG = "myweb.toml"
+RENDERS = ("ox-hugo", "hugo")
+
+
+class ConfigError(Exception):
+    pass
+
+
+def xdg_dir(kind: str) -> Path:
+    """Return the myweb XDG directory of kind config, state or cache."""
+    var, default = {
+        "config": ("XDG_CONFIG_HOME", "~/.config"),
+        "state": ("XDG_STATE_HOME", "~/.local/state"),
+        "cache": ("XDG_CACHE_HOME", "~/.cache"),
+    }[kind]
+    return Path(os.environ.get(var) or default).expanduser() / "myweb"
+
+
+def expand(path: str | Path) -> Path:
+    return Path(os.path.expandvars(str(path))).expanduser()
+
+
+@dataclass
+class Taxon:
+    name: str
+    source: Path
+    render: str = "ox-hugo"
+    #: Tag published revisions as <taxon>/<slug>/vN.
+    tag: bool = False
+
+    @property
+    def section(self) -> str:
+        """The Hugo section path, relative to content/."""
+        parts = self.source.parts
+        if "content" in parts:
+            return "/".join(parts[parts.index("content") + 1 :])
+        return self.name
+
+
+@dataclass
+class Target:
+    name: str
+    environment: str
+    audience: list[str] = field(default_factory=lambda: ["personal", "work", "both"])
+    auth: bool = False
+    #: The AuthUserFile path as seen by the web server.
+    htpasswd: str = ""
+    #: Local directory receiving the build.
+    dest: Path | None = None
+    #: Optional rsync destination ("host:path/") receiving dest.
+    rsync: str = ""
+    #: Paths in dest (and rsync) that a build must not delete.
+    keep: list[str] = field(default_factory=lambda: ["drop/"])
+    base_url: str = ""
+
+
+@dataclass
+class Config:
+    site: Path
+    hugo: list[str] = field(default_factory=lambda: list(DEFAULT_HUGO))
+    emacs: str = "emacs"
+    emacs_load_path: list[Path] = field(default_factory=list)
+    emacsclient: str = "emacsclient"
+    #: How drafts with a deadline reach org-agenda: "emacsclient" or "none".
+    agenda: str = "emacsclient"
+    search: list[str] = field(default_factory=lambda: ["orgface", "search"])
+    browser: str = "xdg-open"
+    server_port: int = 1313
+    publish_targets: list[str] = field(default_factory=lambda: ["local"])
+    taxa: dict[str, Taxon] = field(default_factory=dict)
+    targets: dict[str, Target] = field(default_factory=dict)
+
+    @property
+    def content(self) -> Path:
+        return self.site / "content"
+
+    def taxon(self, name: str) -> Taxon:
+        try:
+            return self.taxa[name]
+        except KeyError:
+            raise ConfigError(
+                f"unknown taxon {name!r}, known: {', '.join(self.taxa)}"
+            ) from None
+
+    def target(self, name: str) -> Target:
+        try:
+            return self.targets[name]
+        except KeyError:
+            raise ConfigError(
+                f"unknown target {name!r}, known: {', '.join(self.targets)}"
+            ) from None
+
+
+def user_config_path() -> Path:
+    env = os.environ.get("MYWEB_CONFIG")
+    if env:
+        return expand(env)
+    return xdg_dir("config") / "config.toml"
+
+
+def _read_toml(path: Path) -> dict:
+    try:
+        with open(path, "rb") as fp:
+            return tomllib.load(fp)
+    except tomllib.TOMLDecodeError as err:
+        raise ConfigError(f"{path}: {err}") from None
+
+
+def _merge(base: dict, over: dict) -> dict:
+    out = dict(base)
+    for key, val in over.items():
+        if isinstance(val, dict) and isinstance(out.get(key), dict):
+            out[key] = _merge(out[key], val)
+        else:
+            out[key] = val
+    return out
+
+
+def _command(val) -> list[str]:
+    return shlex.split(val) if isinstance(val, str) else [str(v) for v in val]
+
+
+def _taxon(name: str, cfg: dict, site: Path) -> Taxon:
+    render = cfg.get("render", "ox-hugo")
+    if render not in RENDERS:
+        raise ConfigError(f"taxon {name}: render must be one of {RENDERS}")
+    source = Path(cfg.get("source", f"content/{name}"))
+    return Taxon(
+        name=name,
+        source=source if source.is_absolute() else site / source,
+        render=render,
+        tag=bool(cfg.get("tag", False)),
+    )
+
+
+def _target(name: str, cfg: dict) -> Target:
+    tgt = Target(name=name, environment=cfg.get("environment", name))
+    for key in ("audience", "keep"):
+        if key in cfg:
+            setattr(tgt, key, list(cfg[key]))
+    tgt.auth = bool(cfg.get("auth", tgt.auth))
+    tgt.htpasswd = str(cfg.get("htpasswd", ""))
+    tgt.rsync = str(cfg.get("rsync", ""))
+    tgt.base_url = str(cfg.get("base_url", ""))
+    if cfg.get("dest"):
+        tgt.dest = expand(cfg["dest"])
+    return tgt
+
+
+def load(
+    path: Path | None = None, site: Path | None = None, env: dict | None = None
+) -> Config:
+    """Load configuration from the layers, last wins: user file, site file, env, args."""
+    env = os.environ if env is None else env
+    path = path or user_config_path()
+    user = _read_toml(path) if path.exists() else {}
+
+    site = site or (expand(env["MYWEB_SITE"]) if env.get("MYWEB_SITE") else None)
+    site = site or expand(user.get("site", "~/keep/web"))
+    site = site.resolve()
+    site_file = site / SITE_CONFIG
+    if not site_file.exists():
+        raise ConfigError(f"no {SITE_CONFIG} in site {site}")
+    sitecfg = _read_toml(site_file)
+
+    # The user file may override any taxon or target field of the site.
+    merged = _merge(sitecfg, {k: user[k] for k in ("taxon", "target") if k in user})
+
+    cfg = Config(site=site)
+    if env.get("MYWEB_HUGO"):
+        cfg.hugo = _command(env["MYWEB_HUGO"])
+    elif "hugo" in user:
+        cfg.hugo = _command(user["hugo"])
+    emacs = user.get("emacs", {})
+    cfg.emacs = emacs.get("command", cfg.emacs)
+    cfg.emacsclient = emacs.get("client", cfg.emacsclient)
+    cfg.emacs_load_path = [
+        expand(p) for p in emacs.get("load_path", DEFAULT_EMACS_LOAD_PATH)
+    ]
+    cfg.agenda = user.get("agenda", cfg.agenda)
+    if "search" in user:
+        cfg.search = _command(user["search"])
+    cfg.browser = user.get("browser", cfg.browser)
+    cfg.server_port = int(user.get("server_port", cfg.server_port))
+    cfg.publish_targets = list(
+        user.get("publish_targets", sitecfg.get("publish_targets", cfg.publish_targets))
+    )
+    cfg.taxa = {n: _taxon(n, c, site) for n, c in merged.get("taxon", {}).items()}
+    cfg.targets = {n: _target(n, c) for n, c in merged.get("target", {}).items()}
+    return cfg
