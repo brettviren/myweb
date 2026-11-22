@@ -154,3 +154,29 @@ def test_migrate_and_rescan(tree, tmp_path):
     assert changed == ["dune/2023/06/06/framework"]
     assert inv["talks"]["dune/2023/06/06/framework"]["status"] == "changed"
     assert "dune/2023/06/06/framework" in talks.needs_review(state, inv)
+
+
+def test_guidance_round_trip(tree, tmp_path):
+    dest = tmp_path / "keep"
+    dest.mkdir()
+    state = talks.State(dest)
+    inv, _, _ = talks.update(state, tree)
+    path = talks.write_report(state, inv)
+    lines = path.read_text().splitlines()
+    at = next(i for i, l in enumerate(lines) if "~dune/2023/06/06/framework~" in l)
+    lines[at + 1:at + 1] = ["", "  - use the path date", "really."]
+    lines.insert(2, "My overall plan.")
+    path.write_text("\n".join(lines) + "\n")
+
+    assert talks.harvest(state, inv)
+    assert inv["talks"]["dune/2023/06/06/framework"]["guidance"] == ["  - use the path date", "really."]
+    assert inv["guidance"][talks.TOP] == ["My overall plan."]
+    # Rewriting keeps it, and reading again finds no change.
+    talks.write_report(state, inv)
+    text = path.read_text()
+    assert "  - use the path date\nreally." in text and "My overall plan." in text
+    assert not talks.harvest(state, inv)
+    # Deleting a note forgets it.
+    path.write_text(text.replace("really.\n", ""))
+    assert talks.harvest(state, inv)
+    assert inv["talks"]["dune/2023/06/06/framework"]["guidance"] == ["  - use the path date"]

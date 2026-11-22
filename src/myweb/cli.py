@@ -367,8 +367,18 @@ def _talks_state(cfg: Config) -> talking.State:
     return talking.State(cfg.talks_dest)
 
 
+def _talks_load(state: talking.State) -> dict:
+    """The inventory with new reviews stamped and the owner's guidance
+    taken from MIGRATION.org before anything rewrites it."""
+    inv = state.load()
+    talking.stamp_reviews(state, inv)
+    if talking.harvest(state, inv):
+        state.save(inv)
+    return inv
+
+
 def _talks_report(state: talking.State, inv: dict) -> None:
-    (state.dest / "MIGRATION.org").write_text(talking.report(state, inv))
+    talking.write_report(state, inv)
 
 
 @talks.command("scan")
@@ -377,6 +387,7 @@ def talks_scan(cfg: Config):
     """Find new and changed talks, write digests of those needing review."""
     try:
         state = _talks_state(cfg)
+        _talks_load(state)
         inv, new, changed = talking.update(state, cfg.talks_source)
         talking.stamp_reviews(state, inv)
         todo = talking.needs_review(state, inv)
@@ -395,8 +406,7 @@ def talks_todo(cfg: Config, paths):
     """List talks needing a review."""
     try:
         state = _talks_state(cfg)
-        inv = state.load()
-        talking.stamp_reviews(state, inv)
+        inv = _talks_load(state)
         for cid in talking.needs_review(state, inv):
             click.echo(state.digest_path(cid) if paths else cid)
     except ERRORS as err:
@@ -419,8 +429,7 @@ def talks_migrate(cfg: Config, ids, redo, dry_run, save):
     """Copy reviewed talks (IDS, default all) to the talks dataset."""
     try:
         state = _talks_state(cfg)
-        inv = state.load()
-        talking.stamp_reviews(state, inv)
+        inv = _talks_load(state)
         done = talking.migrate(state, cfg.talks_source, inv, list(ids) or None, redo=redo, dry_run=dry_run)
         _talks_report(state, inv)
         counts: dict[str, int] = {}
@@ -451,8 +460,7 @@ def talks_resolve(cfg: Config, ids, action, note, date_, topic, migrate):
         fail(ConfigError("give --accept, --reject, --clear, --date or --topic"))
     try:
         state = _talks_state(cfg)
-        inv = state.load()
-        talking.stamp_reviews(state, inv)
+        inv = _talks_load(state)
         for cid in ids:
             talking.resolve(state, inv, cid, action, note=note, date_=date_, topic=topic)
         if migrate:
@@ -469,8 +477,7 @@ def talks_report(cfg: Config):
     """Rewrite MIGRATION.org."""
     try:
         state = _talks_state(cfg)
-        inv = state.load()
-        talking.stamp_reviews(state, inv)
+        inv = _talks_load(state)
         _talks_report(state, inv)
     except ERRORS as err:
         fail(err)

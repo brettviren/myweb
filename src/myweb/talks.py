@@ -21,6 +21,7 @@ again finds new or changed talks; migrating again rewrites talk.json.
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 import json
 import os
@@ -856,8 +857,79 @@ def _home(path: str) -> str:
     return "~" + path[len(home):] if path == home or path.startswith(home + "/") else path
 
 
-def report(state: State, inv: dict) -> str:
-    """MIGRATION.org: every candidate and its status, problems first."""
+REPORT = "MIGRATION.org"
+ITEM_LINE = re.compile(r"^- \[[ X]\] ~(.+?)~")
+HEADING_LINE = re.compile(r"^\* (.+?)(?: \(\d+\))?\s*$")
+TOP = "_top"
+
+
+def _anchors(lines: list[str]) -> list[str]:
+    """For each report line, the item id, "* heading" or _top it is under."""
+    out, anchor = [], TOP
+    for line in lines:
+        if m := ITEM_LINE.match(line):
+            anchor = m[1]
+        elif m := HEADING_LINE.match(line):
+            anchor = f"* {m[1]}"
+        out.append(anchor)
+    return out
+
+
+def _trim(lines: list[str]) -> list[str]:
+    while lines and not lines[0].strip():
+        lines = lines[1:]
+    while lines and not lines[-1].strip():
+        lines = lines[:-1]
+    return lines
+
+
+def harvest(state: State, inv: dict) -> bool:
+    """Take the owner's guidance from MIGRATION.org into the inventory.
+
+    Guidance is every line of the file that the report would not write
+    itself (added or edited lines), kept by the item, heading or top it
+    follows.  Return True if any guidance changed."""
+    path = state.dest / REPORT
+    if not path.exists():
+        return False
+    have = path.read_text().splitlines()
+    made = report(state, inv, guidance=False).splitlines()
+    anchors = _anchors(have)
+    found: dict[str, list[str]] = {}
+    for tag, _, _, j1, j2 in difflib.SequenceMatcher(None, made, have, autojunk=False).get_opcodes():
+        if tag in ("insert", "replace"):
+            for j in range(j1, j2):
+                if not have[j].lower().startswith("#+date:"):
+                    found.setdefault(anchors[j], []).append(have[j])
+    found = {k: v for k, v in ((k, _trim(v)) for k, v in found.items()) if v}
+    old = {k: v for k, v in inv.get("guidance", {}).items()}
+    old.update({cid: e["guidance"] for cid, e in inv["talks"].items() if e.get("guidance")})
+    if found == old:
+        return False
+    inv["guidance"] = {k: v for k, v in found.items() if k not in inv["talks"]}
+    for cid, entry in inv["talks"].items():
+        if cid in found:
+            entry["guidance"] = found[cid]
+        else:
+            entry.pop("guidance", None)
+    return True
+
+
+def write_report(state: State, inv: dict) -> Path:
+    path = state.dest / REPORT
+    path.write_text(report(state, inv))
+    return path
+
+
+def report(state: State, inv: dict, guidance: bool = True) -> str:
+    """MIGRATION.org: every candidate and its status, problems first, with
+    the owner's guidance (see harvest) where it was written."""
+    notes = inv.get("guidance", {}) if guidance else {}
+
+    def add(out: list[str], lines: list[str] | None) -> None:
+        if guidance and lines:
+            out += ["", *lines, ""]
+
     rows = []
     for cid, entry in sorted(inv["talks"].items()):
         cand = Candidate.from_dict(entry["candidate"])
@@ -875,6 +947,7 @@ def report(state: State, inv: dict) -> str:
            "",
            "| status | count |", "|-"]
     out += [f"| {s} | {n} |" for s, n in sorted(counts.items())]
+    add(out, notes.get(TOP))
     sections = [
         ("ambiguous", "Ambiguous: guidance wanted",
          "Not migrated.  Say what to do with each; problems are from the scan and the review."),
@@ -898,10 +971,12 @@ def report(state: State, inv: dict) -> str:
         out += ["", f"* {heading} ({len(mine)})", ""]
         if note:
             out += [note, ""]
+        add(out, notes.get(f"* {heading}"))
         for status_, cid, cand, review, entry in mine:
             title = review.get("title") or (cand.pdf.title if cand.pdf else "") or cand.stem
             if status_ == "migrated":
                 out.append(f"- [X] ~{cid}~ → [[file:{entry.get('dest')}/talk.json][{entry.get('dest')}]] :: {title}")
+                add(out, entry.get("guidance"))
                 continue
             box = "- [ ]"
             out.append(f"{box} ~{cid}~ :: {title}")
@@ -914,4 +989,5 @@ def report(state: State, inv: dict) -> str:
             out.append("  " + "; ".join(info))
             for p in entry.get("problems") or []:
                 out.append(f"  - {p}")
+            add(out, entry.get("guidance"))
     return "\n".join(out) + "\n"
