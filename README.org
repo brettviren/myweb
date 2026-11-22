@@ -33,6 +33,17 @@ Item metadata is in org keywords: ~#+title~, ~#+date~, ~#+hugo_tags~ (or
 Hugo can not filter on front matter so myweb writes an extra hugo config
 per build: content mount exclusions and cascades by path.
 
+Every headline gets a ~CUSTOM_ID~ property, a slug of its heading
+(~myweb ids~, and ~publish~ does it too).  Org's generated ~org1234abc~
+ids are replaced, others kept.  The id is the section's HTML anchor and
+the theme puts a ~#~ link to it after each heading.
+
+Each page's org source, less ~:noexport:~ and ~COMMENT~ subtrees, is
+published beside it as ~<slug>.org~ and the theme links it ("org source",
+from the ~source~ param myweb cascades).  A top ~.htaccess~ serves ~.org~
+as the target's ~org_type~ (default ~text/plain; charset=utf-8~, needs
+~AllowOverride FileInfo~; set ~org_type = ""~ to omit it).
+
 * Commands
 
 #+begin_example
@@ -41,6 +52,7 @@ myweb new notes "TIL" -m "One-liner note."
 myweb edit <item>       # Emacs + background "hugo server" with drafts + browser
 myweb status [-a]       # drafts: deadline, TODO, words, figures, ...
 myweb export [<item>]   # ox-hugo export of stale items
+myweb ids <item>|-a [-n] [--commit]  # slug CUSTOM_ID for every headline
 myweb check <item>      # export, build to a check stage, link check; .check.txt
 myweb publish <item>    # undraft, export, save, stamp, tag, build, deploy
 myweb build [target]    # build to stage, .htaccess, verify, rsync to dest [and remote]

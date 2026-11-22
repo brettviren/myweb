@@ -7,7 +7,7 @@ from datetime import date
 from pathlib import Path
 from string import Template
 
-from . import agenda, deploy, export, orgmeta, vcs, version
+from . import agenda, deploy, export, orgmeta, orgsource, vcs, version
 from .config import Config, ConfigError, Taxon
 from .site import Bundle, slugify
 
@@ -70,6 +70,15 @@ def new(
     return created
 
 
+def ensure_ids(bundle: Bundle, dry_run: bool = False) -> list[tuple[str, str]]:
+    """Give BUNDLE's headlines slug CUSTOM_IDs, return (title, id) of those made."""
+    text = bundle.source.read_text()
+    ids = orgsource.ensure_ids(text)
+    if ids.made and not dry_run:
+        bundle.source.write_text(ids.text)
+    return ids.made
+
+
 @dataclass
 class Published:
     bundle: Bundle
@@ -101,6 +110,7 @@ def publish(
     if problems:
         raise ConfigError(f"{bundle.name}: " + "; ".join(problems))
     _set_draft(bundle, False)
+    ensure_ids(bundle)
     export.export(cfg, [bundle], force=True)
     agenda.remove(cfg, bundle.source)
     if commit:

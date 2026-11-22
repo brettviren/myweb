@@ -13,7 +13,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
-from . import export, hugo
+from . import deploy, export, hugo, orgsource
 from .config import Config, Target, xdg_dir
 from .site import Bundle
 
@@ -83,6 +83,9 @@ def check(cfg: Config, bundle: Bundle, target: Target) -> Report:
         report.warnings.append(f"source block at line {line} exports results but has none")
     if meta.draft:
         report.notes.append("is a draft")
+    unnamed = orgsource.missing_ids(bundle.source.read_text())
+    if unnamed:
+        report.warnings.append(f"{len(unnamed)} headlines lack a slug CUSTOM_ID, see myweb ids")
     if meta.audience not in target.audience:
         report.warnings.append(f"audience {meta.audience} is not served by target {target.name}")
 
@@ -96,8 +99,9 @@ def check(cfg: Config, bundle: Bundle, target: Target) -> Report:
     stage = xdg_dir("cache") / "check" / target.name
     try:
         log = hugo.build(cfg, plan, stage, drafts=True)
-    except hugo.HugoError as err:
-        report.errors.append(f"hugo failed: {err}")
+        deploy.sources(target, plan, stage)
+    except (hugo.HugoError, deploy.DeployError) as err:
+        report.errors.append(f"build failed: {err}")
         return report
     report.warnings += [l for l in log.splitlines() if l.startswith("WARN")]
 

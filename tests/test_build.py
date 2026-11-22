@@ -6,7 +6,7 @@ import subprocess
 import pytest
 
 from conftest import add_post
-from myweb import check, deploy, export
+from myweb import authoring, check, deploy, export, hugo
 from myweb.site import bundles, find
 from myweb.config import DEFAULT_HUGO, DEFAULT_EMACS_LOAD_PATH, expand
 
@@ -82,6 +82,32 @@ def test_build_deploy_and_check(hugo_site, tmp_path):
 
     report = check.check(cfg, find(cfg, "pub"), cfg.target("all"))
     assert report.ok, report.text()
+
+
+@pytest.mark.emacs
+@pytest.mark.hugo
+@pytest.mark.skipif(not (have_hugo() and have_ox_hugo()), reason="needs hugo and ox-hugo")
+def test_sources_and_anchors(hugo_site, tmp_path):
+    cfg = hugo_site
+    path = add_post(cfg, "sec")
+    with open(path / "sec.org", "a") as fp:
+        fp.write("\n* First Part\nOne.\n* Private :noexport:\nsecret\n")
+    note = cfg.taxa["notes"].source / "n1"
+    note.mkdir()
+    (note / "index.org").write_text("#+title: N1\n#+date: 2026-01-03\n\n* A Note Part\nTwo.\n")
+    for bundle in bundles(cfg):
+        authoring.ensure_ids(bundle)
+    assert ":CUSTOM_ID: first-part" in (path / "sec.org").read_text()
+
+    dest = tmp_path / "public_html"
+    deploy.build(cfg, cfg.target("personal"), dest=dest)
+    assert 'id="first-part"' in (dest / "posts" / "sec" / "index.html").read_text()
+    assert 'id="a-note-part"' in (dest / "notes" / "n1" / "index.html").read_text()
+    published = (dest / "posts" / "sec" / "sec.org").read_text()
+    assert "First Part" in published and "secret" not in published
+    assert (dest / "notes" / "n1" / "n1.org").exists()
+    assert "AddType" in (dest / ".htaccess").read_text()
+    assert 'source = "sec.org"' in hugo.config_text(hugo.plan(cfg, cfg.target("personal")))
 
 
 @pytest.mark.emacs

@@ -185,6 +185,34 @@ def check(cfg: Config, item, target_name):
 
 
 @cli.command(no_args_is_help=True)
+@click.argument("items", nargs=-1)
+@click.option("-a", "--all", "every", is_flag=True, help="All items.")
+@click.option("-n", "--dry-run", is_flag=True, help="Only say what would change.")
+@click.option("--commit", is_flag=True, help="Save the changed sources with git.")
+@pass_config
+def ids(cfg: Config, items, every, dry_run, commit):
+    """Give every headline of ITEMS a CUSTOM_ID, a slug of its heading.
+
+    These become the HTML anchors of sections.  Existing ids are kept
+    except org's generated "org1234abc" ones, which are replaced.
+    "publish" does this itself.
+    """
+    try:
+        todo = sites.bundles(cfg) if every else [sites.find(cfg, i) for i in items]
+        changed = []
+        for bundle in todo:
+            made = authoring.ensure_ids(bundle, dry_run=dry_run)
+            for title, ident in made:
+                click.echo(f"{bundle.name}: #{ident}  {title}")
+            if made:
+                changed.append(bundle.source)
+        if commit and changed and not dry_run:
+            vcs.save(cfg.site, "headline CUSTOM_IDs", changed)
+    except ERRORS as err:
+        fail(err)
+
+
+@cli.command(no_args_is_help=True)
 @click.argument("item")
 @click.option("-T", "--target", "targets", multiple=True, help="Deploy to this target, may repeat.  Default from config.")
 @click.option("--no-commit", is_flag=True, help="Do not save, stamp or tag.")

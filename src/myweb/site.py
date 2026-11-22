@@ -8,12 +8,11 @@ which Emacs exports to ``<slug>/index.md``.  A taxon rendered by hugo holds
 
 from __future__ import annotations
 
-import re
-import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
 from . import orgmeta
+from .orgsource import slugify  # noqa: F401  (re-exported)
 from .config import Config, ConfigError, Taxon
 
 
@@ -35,6 +34,11 @@ class Bundle:
         if self.taxon.render == "hugo":
             return self.path / "index.org"
         return self.path / f"{self.slug}.org"
+
+    @property
+    def source_name(self) -> str:
+        """The name the org source is published under, beside index.html."""
+        return f"{self.slug}.org"
 
     @property
     def output(self) -> Path | None:
@@ -62,12 +66,6 @@ class Bundle:
         if out is None:
             return False
         return not out.exists() or out.stat().st_mtime < self.source.stat().st_mtime
-
-
-def slugify(title: str) -> str:
-    text = unicodedata.normalize("NFKD", title).encode("ascii", "ignore").decode()
-    text = re.sub(r"[^\w\s-]", "", text.lower())
-    return re.sub(r"[\s_-]+", "-", text).strip("-")
 
 
 def bundles(cfg: Config, taxa: list[str] | None = None) -> list[Bundle]:

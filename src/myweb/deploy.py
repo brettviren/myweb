@@ -7,7 +7,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import export, hugo
+from . import export, hugo, orgsource
 from .config import Config, Target, xdg_dir
 from .site import bundles
 
@@ -22,6 +22,12 @@ AuthType Basic
 AuthName "{name}"
 AuthUserFile {htpasswd}
 Require valid-user
+"""
+
+
+ORG_TYPE = """\
+# Written by myweb: show org sources as text.
+AddType "{type}" .org
 """
 
 
@@ -51,6 +57,21 @@ def protect(target: Target, plan: hugo.Plan, stage: Path) -> list[Path]:
         path = page / ".htaccess"
         path.write_text(HTACCESS.format(name=bundle.name, htpasswd=Path(target.htpasswd).expanduser()))
         out.append(path)
+    return out
+
+
+def sources(target: Target, plan: hugo.Plan, stage: Path) -> list[Path]:
+    """Put each page's org source, less :noexport: subtrees, beside it."""
+    out = []
+    for bundle in plan.included:
+        page = stage / bundle.url_path
+        if not page.is_dir():
+            raise DeployError(f"page {bundle.name} not found in {stage}")
+        path = page / bundle.source_name
+        path.write_text(orgsource.publishable(bundle.source.read_text()))
+        out.append(path)
+    if target.org_type:
+        (stage / ".htaccess").write_text(ORG_TYPE.format(type=target.org_type))
     return out
 
 
@@ -94,6 +115,7 @@ def build(
     plan = hugo.plan(cfg, target, drafts=drafts)
     stage = stage_dir(target)
     log = hugo.build(cfg, plan, stage, drafts=drafts)
+    sources(target, plan, stage)
     protect(target, plan, stage)
     verify(cfg, target, plan, stage)
     result = Result(target, stage, plan, exported=exported, log=log)

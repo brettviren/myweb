@@ -7,7 +7,9 @@ build it writes an extra hugo config that:
   served by the target, and every protected bundle if the target lacks
   auth;
 - marks, via cascade, unlisted and protected bundles to be rendered but
-  never listed (indices, RSS, sitemap) and sets their "visibility" param.
+  never listed (indices, RSS, sitemap) and sets their "visibility" param;
+- sets, via cascade, each bundle's "source" param to the name its org
+  source is published under, for the theme to link.
 """
 
 from __future__ import annotations
@@ -74,13 +76,15 @@ def config_text(p: Plan) -> str:
     if excludes:
         lines.append("files = [" + ", ".join(_q(e) for e in excludes) + "]")
     lines.append("")
-    for bundle, vis in p.hidden:
+    hidden = {b.name: vis for b, vis in p.hidden}
+    for bundle in p.included:
+        lines.append("[[cascade]]")
+        if bundle.name in hidden:
+            lines += ["[cascade.build]", 'list = "never"']
+        lines += ["[cascade.params]", f"source = {_q(bundle.source_name)}"]
+        if bundle.name in hidden:
+            lines.append(f"visibility = {_q(hidden[bundle.name])}")
         lines += [
-            "[[cascade]]",
-            "[cascade.build]",
-            'list = "never"',
-            "[cascade.params]",
-            f"visibility = {_q(vis)}",
             "[cascade.target]",
             f"path = {_q('/' + bundle.content_rel)}",
             "",

@@ -75,6 +75,9 @@ class Target:
     #: Paths in dest (and rsync) that a build must not delete.
     keep: list[str] = field(default_factory=lambda: ["drop/"])
     base_url: str = ""
+    #: Media type for published org sources, set by a top .htaccess
+    #: (needs AllowOverride FileInfo).  Empty to write none.
+    org_type: str = "text/plain; charset=utf-8"
 
 
 @dataclass
@@ -165,6 +168,7 @@ def _target(name: str, cfg: dict) -> Target:
     tgt.htpasswd = str(cfg.get("htpasswd", ""))
     tgt.rsync = str(cfg.get("rsync", ""))
     tgt.base_url = str(cfg.get("base_url", ""))
+    tgt.org_type = str(cfg.get("org_type", tgt.org_type))
     if cfg.get("dest"):
         tgt.dest = expand(cfg["dest"])
     return tgt
