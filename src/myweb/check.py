@@ -100,6 +100,7 @@ def check(cfg: Config, bundle: Bundle, target: Target) -> Report:
     try:
         log = hugo.build(cfg, plan, stage, drafts=True)
         deploy.sources(target, plan, stage)
+        deploy.talk_files(cfg, plan, stage)
     except (hugo.HugoError, deploy.DeployError) as err:
         report.errors.append(f"build failed: {err}")
         return report

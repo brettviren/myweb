@@ -68,7 +68,8 @@ def site(tmp_path, monkeypatch):
 
 @pytest.fixture
 def cfg(site, tmp_path):
-    return load(path=tmp_path / "none.toml", site=site, env={})
+    return load(path=tmp_path / "none.toml", site=site,
+                env={"MYWEB_TALKS_DEST": str(tmp_path / "talks"), "MYWEB_TALKS_SOURCE": str(tmp_path / "old")})
 
 
 def add_post(cfg, slug, title=None, draft="false", audience="both", visibility="public"):

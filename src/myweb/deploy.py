@@ -7,7 +7,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import access, export, hugo, orgsource, siteindex
+from . import access, export, hugo, orgsource, siteindex, talkpages
 from .config import Config, Target, xdg_dir
 from .site import bundles
 
@@ -30,6 +30,7 @@ class Result:
     exported: list = field(default_factory=list)
     synced: list[str] = field(default_factory=list)
     log: str = ""
+    warnings: list[str] = field(default_factory=list)
 
 
 def stage_dir(target: Target) -> Path:
@@ -66,9 +67,28 @@ def sources(target: Target, plan: hugo.Plan, stage: Path) -> list[Path]:
     return out
 
 
+def talk_files(cfg: Config, plan: hugo.Plan, stage: Path) -> list[str]:
+    """Copy each included talk's PDF beside its page.  Return warnings for
+    talks whose PDF content is not on this host."""
+    warnings = []
+    for talk in plan.talks:
+        page = stage / talk.url_path
+        if not page.is_dir():
+            raise DeployError(f"talk page {talk.name} not found in {stage}")
+        src = talkpages.pdf_path(cfg.talks_dest, talk)
+        if src is None:
+            if talk.data.get("pdf"):
+                warnings.append(f"{talk.name}: {talk.data['pdf']} content not present (git annex get?)")
+            continue
+        dest = page / src.name
+        if not dest.exists() or dest.stat().st_size != src.stat().st_size:
+            shutil.copyfile(src, dest)
+    return warnings
+
+
 def verify(cfg: Config, target: Target, plan: hugo.Plan, stage: Path) -> None:
     """Fail if anything excluded from this target nevertheless got built."""
-    leaks = [b.name for b, _ in plan.excluded if (stage / b.url_path).exists()]
+    leaks = [b.name for b, _ in [*plan.excluded, *plan.talks_excluded] if (stage / b.url_path).exists()]
     if leaks:
         raise DeployError(f"excluded pages leaked into {target.name}: {', '.join(leaks)}")
     if plan.protected and not target.auth:
@@ -110,10 +130,11 @@ def build(
     stage = stage_dir(target)
     log = hugo.build(cfg, plan, stage, drafts=drafts)
     sources(target, plan, stage)
+    warnings = talk_files(cfg, plan, stage)
     protect(target, plan, stage)
     siteindex.write(target, plan, stage)
     verify(cfg, target, plan, stage)
-    result = Result(target, stage, plan, exported=exported, log=log)
+    result = Result(target, stage, plan, exported=exported, log=log, warnings=warnings)
     if not sync:
         return result
     dest = dest or target.dest

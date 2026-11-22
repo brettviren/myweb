@@ -31,6 +31,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
 
+#: talk.json fields a person may set, which migrating again keeps.
+KEPT_FIELDS = ("audience", "visibility", "access", "draft")
 #: Bumped when what migrate writes changes, so old migrations show as stale.
 VERSION = 1
 
@@ -657,6 +659,11 @@ def decide(cand: Candidate, review: dict | None) -> tuple[str, list[str]]:
         return "duplicate", []
     if review is None:
         return "unreviewed", []
+    if review.get("resolution") == "reject":
+        return "rejected", [review.get("resolution_note") or "rejected by owner"]
+    if review.get("resolution") == "accept":
+        return ("ready", []) if cand.group and (review.get("date") or cand.date) else \
+            ("ambiguous", ["accepted but has no group or date; give --date"])
     if review.get("is_talk") is False:
         return "not-a-talk", list(review.get("problems") or [])
     problems = list(review.get("problems") or [])
@@ -664,11 +671,48 @@ def decide(cand: Candidate, review: dict | None) -> tuple[str, list[str]]:
         problems.append("someone else's talk")
     if not cand.group:
         problems.append("not in a group directory")
-    if not cand.date:
+    if not (review.get("date") or cand.date):
         problems.append("no date found")
     if problems:
         return "ambiguous", problems
     return "ready", []
+
+
+RESOLUTIONS = ("accept", "reject", "clear")
+
+
+def resolve(state: State, inv: dict, cid: str, action: str | None, note: str = "",
+            date_: str = "", topic: str = "") -> dict:
+    """Record the owner's decision on a candidate in its review: accept
+    (migrate despite problems), reject (never migrate), clear (undo) or
+    None (keep any earlier decision).  DATE and TOPIC override where it goes, if it is not yet migrated."""
+    if cid not in inv["talks"]:
+        raise TalksError(f"no talk candidate {cid!r}")
+    if action is not None and action not in RESOLUTIONS:
+        raise TalksError(f"resolution must be one of {RESOLUTIONS}")
+    entry = inv["talks"][cid]
+    if action == "reject" and entry.get("status") == "migrated":
+        raise TalksError(f"{cid} is migrated to {entry.get('dest')}; remove that first")
+    if (date_ or topic) and entry.get("status") == "migrated":
+        raise TalksError(f"{cid} is migrated to {entry.get('dest')}; move it there instead")
+    if date_ and not parse_loose_date(date_):
+        raise TalksError(f"bad date {date_!r}, give YYYY-MM-DD")
+    review = state.review(cid) or {"id": cid, "reviewed_by": "owner", "is_talk": True, "problems": []}
+    review.setdefault("fingerprint", entry["candidate"]["fingerprint"])
+    if action == "clear":
+        for key in ("resolution", "resolution_note"):
+            review.pop(key, None)
+    elif action:
+        review["resolution"] = action
+        review["resolution_note"] = note
+    if date_:
+        review["date"] = parse_loose_date(date_)
+    if topic:
+        review["topic_slug"] = slug(topic)
+    path = state.review_path(cid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(review, indent=1, ensure_ascii=False) + "\n")
+    return review
 
 
 def copy_set(root: Path, cand: Candidate, others: list[Candidate]) -> list[str]:
@@ -709,8 +753,8 @@ def talk_json(cand: Candidate, review: dict, copied: list[str]) -> dict:
     topic = review.get("topic_slug") or ""
     data = {
         "group": cand.group,
-        "date": cand.date,
-        "date_source": cand.date_source,
+        "date": review.get("date") or cand.date,
+        "date_source": "owner" if review.get("date") else cand.date_source,
         "topic": slug(topic) if topic else slug(cand.topic),
         "series": cand.series,
         "title": review.get("title") or (pdf.title if pdf else "") or cand.stem,
@@ -769,9 +813,10 @@ def migrate(state: State, root: Path, inv: dict, ids: list[str] | None = None,
             continue
         old_dest = entry.get("dest")
         dest = old_dest or cand.dest
-        if review.get("topic_slug") and not old_dest:
-            y, m, d = cand.date.split("-")
-            base = f"{cand.group}/{y}/{m}/{d}/{slug(review['topic_slug'])}"
+        when = review.get("date") or cand.date
+        if (review.get("topic_slug") or review.get("date")) and not old_dest:
+            y, m, d = when.split("-")
+            base = f"{cand.group}/{y}/{m}/{d}/{slug(review.get('topic_slug') or cand.topic)}"
             used = {e.get("dest") for k, e in inv["talks"].items() if k != cid}
             used |= {c.dest for c in live if c.id != cid}
             dest, n = base, 1
@@ -789,8 +834,13 @@ def migrate(state: State, root: Path, inv: dict, ids: list[str] | None = None,
                 if to.is_symlink():
                     to.unlink()
                 shutil.copy2(src, to)  # follows symlinks
-            (target / "talk.json").write_text(json.dumps(talk_json(cand, review, copied), indent=1,
-                                                         ensure_ascii=False) + "\n")
+            data = talk_json(cand, review, copied)
+            old = target / "talk.json"
+            if old.exists():
+                # Keep what a person set for the web (see talkpages.py).
+                kept = json.loads(old.read_text())
+                data.update({k: kept[k] for k in KEPT_FIELDS if k in kept})
+            old.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n")
             entry.update(status="migrated", dest=dest, version=VERSION,
                          migrated=datetime.now(timezone.utc).isoformat(timespec="seconds"))
         out.append((cid, "would migrate" if dry_run else "migrated", dest))
@@ -800,6 +850,11 @@ def migrate(state: State, root: Path, inv: dict, ids: list[str] | None = None,
 
 
 # ---- report
+
+def _home(path: str) -> str:
+    home = str(Path.home())
+    return "~" + path[len(home):] if path == home or path.startswith(home + "/") else path
+
 
 def report(state: State, inv: dict) -> str:
     """MIGRATION.org: every candidate and its status, problems first."""
@@ -815,7 +870,7 @@ def report(state: State, inv: dict) -> str:
     out = ["#+title: Talks migration",
            f"#+date: {inv.get('scanned', '')}",
            "",
-           f"Source: ~{inv.get('source', '').removeprefix(str(Path.home()))}/, "
+           f"Source: {_home(inv.get('source', ''))}/, "
            "written by ~myweb talks report~ from ~migration/inventory.json~ and ~migration/reviews/~.",
            "",
            "| status | count |", "|-"]
@@ -824,6 +879,7 @@ def report(state: State, inv: dict) -> str:
         ("ambiguous", "Ambiguous: guidance wanted",
          "Not migrated.  Say what to do with each; problems are from the scan and the review."),
         ("not-a-talk", "Judged not to be talks", "Not migrated.  Correct any that are talks."),
+        ("rejected", "Rejected by the owner", ""),
         ("unreviewed", "Not yet reviewed", ""),
         ("found", "Not yet reviewed", ""),
         ("changed", "Changed since migration", "Source changed; review and migrate again."),

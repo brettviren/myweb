@@ -123,8 +123,29 @@ def test_migrate_and_rescan(tree, tmp_path):
     assert not (dest / "dune/2023/06/06/framework/framework.aux").exists()
     assert not (dest / "dune/2023/06/06/framework/striped.org").exists()
 
+    # The owner accepts the ambiguous one at another date, rejects another.
+    talks.resolve(state, inv, "dune/2023/06/06/striped", "accept", note="fine", date_="2023-06-07")
+    done = {cid: (status, d) for cid, status, d in talks.migrate(state, tree, inv)}
+    assert done["dune/2023/06/06/striped"] == ("migrated", "dune/2023/06/07/striped")
+    assert json.loads((dest / "dune/2023/06/07/striped/talk.json").read_text())["date_source"] == "owner"
+    with pytest.raises(talks.TalksError):
+        talks.resolve(state, inv, "dune/2023/06/06/striped", None, topic="other")
+    with pytest.raises(talks.TalksError):
+        talks.resolve(state, inv, "wire-cell/topics/config/config", "reject")
+    talks.resolve(state, inv, "dayabay/2009/04/01/upgrades/upgrades", "reject", note="dup")
+    talks.migrate(state, tree, inv)
+    assert inv["talks"]["dayabay/2009/04/01/upgrades/upgrades"]["status"] == "rejected"
+
+    # What a person sets in talk.json survives migrating again.
+    path = dest / "dune/2023/06/06/framework/talk.json"
+    meta["visibility"] = "protected"
+    path.write_text(json.dumps(meta))
+    talks.migrate(state, tree, inv, redo=True)
+    assert json.loads(path.read_text())["visibility"] == "protected"
+
     report = talks.report(state, inv)
-    assert "maybe a draft" in report and "[X] ~dune/2023/06/06/framework~" in report
+    assert "[X] ~dune/2023/06/06/framework~" in report and "[X] ~dune/2023/06/06/striped~" in report
+    assert "* Rejected by the owner (1)" in report
 
     # A changed source shows up on the next scan and its review goes stale.
     (tree / "dune/2023/06/06/framework.org").write_text(ORG.format(title="Frameworks 2", extra="x"))

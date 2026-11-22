@@ -9,7 +9,9 @@ build it writes an extra hugo config that:
 - marks, via cascade, unlisted and protected bundles to be rendered but
   never listed (indices, RSS, sitemap) and sets their "visibility" param;
 - sets, via cascade, each bundle's "source" param to the name its org
-  source is published under, for the theme to link.
+  source is published under, for the theme to link;
+- mounts the talks the target gets, written by talkpages.py, as
+  content/talks.
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import access, orgmeta
+from . import access, orgmeta, talkpages
 from .config import Config, Target, xdg_dir
 from .site import Bundle, bundles
 
@@ -39,34 +41,57 @@ class Plan:
     #: Of each included bundle, by name: its meta and access realm.
     meta: dict[str, orgmeta.Meta] = field(default_factory=dict)
     realm: dict[str, access.Realm] = field(default_factory=dict)
+    #: Talks, which share meta, realm and hidden with bundles.
+    talks: list[talkpages.Talk] = field(default_factory=list)
+    talks_excluded: list[tuple[talkpages.Talk, str]] = field(default_factory=list)
 
     @property
-    def protected(self) -> list[Bundle]:
+    def protected(self) -> list:
+        """Protected bundles and talks."""
         return [b for b, vis in self.hidden if vis == "protected"]
+
+    @property
+    def pages(self) -> list:
+        """Every included page: bundles then talks."""
+        return [*self.included, *self.talks]
+
+
+def _why_not(target: Target, meta: orgmeta.Meta, drafts: bool) -> str:
+    """Why a page with META is not built for TARGET, "" if it is."""
+    if meta.audience not in target.audience:
+        return f"audience {meta.audience}"
+    if meta.visibility == "protected" and not target.auth:
+        return "protected, target has no auth"
+    if meta.draft and not drafts:
+        return "draft"
+    if access.page_realm(target, meta) is None:
+        return f"access realm {meta.access} not on target"
+    return ""
 
 
 def plan(cfg: Config, target: Target, drafts: bool = False) -> Plan:
     result = Plan(target)
     for bundle in bundles(cfg):
         meta = bundle.meta()
-        why = ""
-        if meta.audience not in target.audience:
-            why = f"audience {meta.audience}"
-        elif meta.visibility == "protected" and not target.auth:
-            why = "protected, target has no auth"
-        elif meta.draft and not drafts:
-            why = "draft"
-        elif (realm := access.page_realm(target, meta)) is None:
-            why = f"access realm {meta.access} not on target"
-        if why:
+        if why := _why_not(target, meta, drafts):
             result.excluded.append((bundle, why))
             continue
         result.included.append(bundle)
-        result.meta[bundle.name] = meta
-        result.realm[bundle.name] = realm
-        if meta.visibility in ("unlisted", "protected"):
-            result.hidden.append((bundle, meta.visibility))
+        _admit(result, bundle, meta)
+    for talk in talkpages.load(cfg.talks_dest, cfg.talks):
+        if why := _why_not(target, talk.meta, drafts):
+            result.talks_excluded.append((talk, why))
+            continue
+        result.talks.append(talk)
+        _admit(result, talk, talk.meta)
     return result
+
+
+def _admit(result: Plan, page, meta: orgmeta.Meta) -> None:
+    result.meta[page.name] = meta
+    result.realm[page.name] = access.page_realm(result.target, meta)
+    if meta.visibility in ("unlisted", "protected"):
+        result.hidden.append((page, meta.visibility))
 
 
 def _q(text: str) -> str:
@@ -84,6 +109,13 @@ def config_text(p: Plan) -> str:
     if excludes:
         lines.append("files = [" + ", ".join(_q(e) for e in excludes) + "]")
     lines.append("")
+    if p.talks:
+        lines += [
+            "[[module.mounts]]",
+            f"source = {_q(str(talks_dir(p)))}",
+            f'target = "content/{talkpages.SECTION}"',
+            "",
+        ]
     hidden = {b.name: vis for b, vis in p.hidden}
     for bundle in p.included:
         lines.append("[[cascade]]")
@@ -100,7 +132,13 @@ def config_text(p: Plan) -> str:
     return "\n".join(lines)
 
 
+def talks_dir(p: Plan) -> Path:
+    return xdg_dir("cache") / "talks" / p.target.name
+
+
 def write_config(p: Plan) -> Path:
+    """Write the extra hugo config, and the talks it mounts."""
+    talkpages.write(p.talks, talks_dir(p))
     path = xdg_dir("cache") / "hugo" / f"{p.target.name}.toml"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(config_text(p))

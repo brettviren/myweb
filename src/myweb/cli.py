@@ -26,6 +26,7 @@ from . import (
     site as sites,
     siteindex,
     status as statusing,
+    talkpages,
     talks as talking,
     vcs,
     version as versioning,
@@ -40,6 +41,7 @@ ERRORS = (
     deploy.DeployError,
     siteindex.SearchError,
     talking.TalksError,
+    talkpages.TalkError,
     vcs.VcsError,
     FileExistsError,
 )
@@ -255,6 +257,8 @@ def build(cfg: Config, target_name, dest, remote, drafts, no_export, stage_only,
         )
     except ERRORS as err:
         fail(err)
+    for line in result.warnings:
+        click.echo(f"warning: {line}", err=True)
     if quiet:
         return
     for bundle in result.exported:
@@ -263,10 +267,12 @@ def build(cfg: Config, target_name, dest, remote, drafts, no_export, stage_only,
         click.echo(f"excluded {bundle.name}: {why}")
     for bundle, vis in result.plan.hidden:
         click.echo(f"{vis} {bundle.name}")
+    for talk, why in result.plan.talks_excluded:
+        click.echo(f"excluded {talk.name}: {why}")
     for line in result.log.splitlines():
         if line.startswith(("WARN", "ERROR")):
             click.echo(line, err=True)
-    click.echo(f"built {len(result.plan.included)} items to {result.stage}")
+    click.echo(f"built {len(result.plan.included)} items and {len(result.plan.talks)} talks to {result.stage}")
     for where in result.synced:
         click.echo(f"synced to {where}")
 
@@ -425,6 +431,34 @@ def talks_migrate(cfg: Config, ids, redo, dry_run, save):
         click.echo(", ".join(f"{n} {s}" for s, n in sorted(counts.items())))
         if save and not dry_run:
             vcs.save(state.dest, "talks: migrate from " + str(cfg.talks_source).replace(str(Path.home()), "~"))
+    except ERRORS as err:
+        fail(err)
+
+
+@talks.command("resolve", no_args_is_help=True)
+@click.argument("ids", nargs=-1, required=True)
+@click.option("-a", "--accept", "action", flag_value="accept", help="Migrate despite the problems.")
+@click.option("-r", "--reject", "action", flag_value="reject", help="Never migrate.")
+@click.option("--clear", "action", flag_value="clear", help="Forget an earlier accept or reject.")
+@click.option("-m", "--note", default="", help="Why, kept in the review.")
+@click.option("-d", "--date", "date_", default="", help="Date to use, YYYY-MM-DD.")
+@click.option("-t", "--topic", default="", help="Topic directory name to use.")
+@click.option("--migrate/--no-migrate", default=True, show_default=True, help="Migrate what this makes ready.")
+@pass_config
+def talks_resolve(cfg: Config, ids, action, note, date_, topic, migrate):
+    """Decide on talks listed in MIGRATION.org: IDS are their ~id~s."""
+    if not action and not (date_ or topic):
+        fail(ConfigError("give --accept, --reject, --clear, --date or --topic"))
+    try:
+        state = _talks_state(cfg)
+        inv = state.load()
+        talking.stamp_reviews(state, inv)
+        for cid in ids:
+            talking.resolve(state, inv, cid, action, note=note, date_=date_, topic=topic)
+        if migrate:
+            for cid, status, dest in talking.migrate(state, cfg.talks_source, inv, list(ids)):
+                click.echo(f"{cid}: {status}" + (f" -> {dest}" if dest else ""))
+        _talks_report(state, inv)
     except ERRORS as err:
         fail(err)
 

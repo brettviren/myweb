@@ -99,23 +99,27 @@ class Index:
 def indexes(target: Target, plan: Plan, stage: Path) -> dict[str, Index]:
     """The index of each realm with pages on this plan, public always."""
     out = {access.PUBLIC: Index(access.Realm(access.PUBLIC))}
-    for bundle in plan.included:
-        realm = access.index_realm(target, plan.meta[bundle.name])
+    for item in plan.pages:
+        realm = access.index_realm(target, plan.meta[item.name])
         if realm is None:
             continue
-        page = stage / bundle.url_path / "index.html"
+        page = stage / item.url_path / "index.html"
         if not page.exists():
             continue
         title, text = page_text(page.read_text(errors="replace"))
-        meta = plan.meta[bundle.name]
-        out.setdefault(realm.name, Index(realm)).pages.append({
-            "url": bundle.url_path,  # relative to the site root
+        meta = plan.meta[item.name]
+        entry = {
+            "url": item.url_path,  # relative to the site root
             "title": title or meta.title,
             "date": meta.date,
-            "section": bundle.taxon.section,
+            "section": item.section,
             "tags": meta.tags,
             "text": text,
-        })
+        }
+        if hasattr(item, "facets"):  # a talk
+            entry.update(item.facets())
+            entry["tags"] = item.data.get("keywords") or []
+        out.setdefault(realm.name, Index(realm)).pages.append(entry)
     return out
 
 
@@ -157,9 +161,9 @@ def check(target: Target, plan: Plan, stage: Path) -> list[str]:
     """Problems with the written indexes: a page in the wrong realm's index,
     or a realm index not guarded as its pages are."""
     want = {}
-    for bundle in plan.included:
-        realm = access.index_realm(target, plan.meta[bundle.name])
-        want[bundle.url_path] = realm.name if realm else None
+    for item in plan.pages:
+        realm = access.index_realm(target, plan.meta[item.name])
+        want[item.url_path] = realm.name if realm else None
     problems = []
     for path in sorted((stage / SEARCH).rglob(INDEX)):
         data = json.loads(path.read_text())

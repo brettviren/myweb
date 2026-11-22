@@ -36,6 +36,10 @@ class Bundle:
         return self.path / f"{self.slug}.org"
 
     @property
+    def section(self) -> str:
+        return self.taxon.section
+
+    @property
     def source_name(self) -> str:
         """The name the org source is published under, beside index.html."""
         return f"{self.slug}.org"

@@ -102,6 +102,9 @@ class Config:
     #: The old talks tree, only ever read, and the talks dataset.
     talks_source: Path = field(default_factory=lambda: expand("~/sync/talks"))
     talks_dest: Path = field(default_factory=lambda: expand("~/keep/talks"))
+    #: The [talks] settings of the site, then the user: audience,
+    #: visibility, access defaults, also per [talks.group.<name>].
+    talks: dict = field(default_factory=dict)
     publish_targets: list[str] = field(default_factory=lambda: ["local"])
     taxa: dict[str, Taxon] = field(default_factory=dict)
     targets: dict[str, Target] = field(default_factory=dict)
@@ -225,6 +228,7 @@ def load(
     cfg.browser = user.get("browser", cfg.browser)
     cfg.server_port = int(user.get("server_port", cfg.server_port))
     talks = user.get("talks", {})
+    cfg.talks = _merge(sitecfg.get("talks", {}), talks)
     cfg.talks_source = expand(env.get("MYWEB_TALKS_SOURCE") or talks.get("source", cfg.talks_source))
     cfg.talks_dest = expand(env.get("MYWEB_TALKS_DEST") or talks.get("dest", cfg.talks_dest))
     cfg.publish_targets = list(
