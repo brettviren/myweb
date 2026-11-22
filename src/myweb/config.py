@@ -99,6 +99,9 @@ class Config:
     search: list[str] = field(default_factory=lambda: ["orgface", "search"])
     browser: str = "xdg-open"
     server_port: int = 1313
+    #: The old talks tree, only ever read, and the talks dataset.
+    talks_source: Path = field(default_factory=lambda: expand("~/sync/talks"))
+    talks_dest: Path = field(default_factory=lambda: expand("~/keep/talks"))
     publish_targets: list[str] = field(default_factory=lambda: ["local"])
     taxa: dict[str, Taxon] = field(default_factory=dict)
     targets: dict[str, Target] = field(default_factory=dict)
@@ -221,6 +224,9 @@ def load(
         cfg.search = _command(user["search"])
     cfg.browser = user.get("browser", cfg.browser)
     cfg.server_port = int(user.get("server_port", cfg.server_port))
+    talks = user.get("talks", {})
+    cfg.talks_source = expand(env.get("MYWEB_TALKS_SOURCE") or talks.get("source", cfg.talks_source))
+    cfg.talks_dest = expand(env.get("MYWEB_TALKS_DEST") or talks.get("dest", cfg.talks_dest))
     cfg.publish_targets = list(
         user.get("publish_targets", sitecfg.get("publish_targets", cfg.publish_targets))
     )

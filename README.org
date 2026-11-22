@@ -79,6 +79,34 @@ out of lists, RSS and the sitemap.
 
 Without JavaScript the search page offers the section indices instead.
 
+* Talks migration
+
+~myweb talks~ migrates the old ~~/sync/talks~ (only ever read) into the
+~~/keep/talks~ dataset as ~<group>/<YYYY>/<MM>/<DD>/<topic>/~ with a
+~talk.json~ per talk.  Set ~[talks] source~ and ~dest~ to change them.
+
+#+begin_example
+myweb talks scan        # find new/changed talks, write digests of those needing review
+myweb talks todo -p     # digests still needing a review
+myweb talks fields      # what a review holds
+myweb talks migrate [--redo] [-n] [--save]
+myweb talks report      # rewrite MIGRATION.org
+#+end_example
+
+A candidate is a slide source (org or LaTeX beamer, LibreOffice,
+PowerPoint) or a slide-like PDF (5+ landscape pages not from a plotting
+tool).  Its date comes from the path or file name, then ~#+date~ /
+~\date{}~, then the PDF's CreationDate, then the file's mtime (birth times
+are those of a later copy).  A partial path date (no day) is completed by
+the first fallback agreeing with it.  Duplicates (same PDF, or same group,
+date and name) are migrated once, preferring the date tree.
+
+A review (~migration/reviews/<id>.json~), written by reading the
+candidate's digest (by a person or an LLM), says if it is a talk and gives
+title, venue, summary and problems.  Problems block migration and are
+listed in ~MIGRATION.org~ for a person to decide.  A changed source makes
+its review stale.  State is ~migration/inventory.json~.
+
 * Commands
 
 #+begin_example

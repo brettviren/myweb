@@ -5,6 +5,7 @@ Argument parsing, output and exit only.  The work is in the other modules.
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from datetime import date
@@ -25,6 +26,7 @@ from . import (
     site as sites,
     siteindex,
     status as statusing,
+    talks as talking,
     vcs,
     version as versioning,
 )
@@ -37,6 +39,7 @@ ERRORS = (
     hugo.HugoError,
     deploy.DeployError,
     siteindex.SearchError,
+    talking.TalksError,
     vcs.VcsError,
     FileExistsError,
 )
@@ -338,6 +341,106 @@ def setup(cfg: Config, method, target_name, when, just_print, force, unitdir):
         fail(err)
     except OSError as err:
         fail(f"{err} (use --print to see what to install)")
+
+
+@cli.group(no_args_is_help=True)
+def talks():
+    """Migrate talks from the old talks tree to the talks dataset.
+
+    "scan" finds talk candidates and writes a digest of each needing a
+    review.  A review, migration/reviews/<id>.json, is written by reading
+    the digest (fields: "myweb talks fields").  "migrate" copies reviewed
+    talks to <group>/<YYYY>/<MM>/<DD>/<topic>/ with a talk.json.  Every
+    command rewrites MIGRATION.org.  The old tree is only read.
+    """
+
+
+def _talks_state(cfg: Config) -> talking.State:
+    if not cfg.talks_dest.is_dir():
+        raise ConfigError(f"no talks dataset at {cfg.talks_dest}")
+    return talking.State(cfg.talks_dest)
+
+
+def _talks_report(state: talking.State, inv: dict) -> None:
+    (state.dest / "MIGRATION.org").write_text(talking.report(state, inv))
+
+
+@talks.command("scan")
+@pass_config
+def talks_scan(cfg: Config):
+    """Find new and changed talks, write digests of those needing review."""
+    try:
+        state = _talks_state(cfg)
+        inv, new, changed = talking.update(state, cfg.talks_source)
+        talking.stamp_reviews(state, inv)
+        todo = talking.needs_review(state, inv)
+        talking.write_digests(state, cfg.talks_source, inv, todo)
+        _talks_report(state, inv)
+    except ERRORS as err:
+        fail(err)
+    click.echo(f"{len(inv['talks'])} candidates, {len(new)} new, {len(changed)} changed, "
+               f"{len(todo)} need review (digests in {state.dir / 'digests'})")
+
+
+@talks.command("todo")
+@click.option("-p", "--paths", is_flag=True, help="Print digest paths instead of ids.")
+@pass_config
+def talks_todo(cfg: Config, paths):
+    """List talks needing a review."""
+    try:
+        state = _talks_state(cfg)
+        inv = state.load()
+        talking.stamp_reviews(state, inv)
+        for cid in talking.needs_review(state, inv):
+            click.echo(state.digest_path(cid) if paths else cid)
+    except ERRORS as err:
+        fail(err)
+
+
+@talks.command("fields")
+def talks_fields():
+    """Describe the fields of a review."""
+    click.echo(json.dumps(talking.REVIEW_FIELDS, indent=1))
+
+
+@talks.command("migrate")
+@click.argument("ids", nargs=-1)
+@click.option("--redo", is_flag=True, help="Migrate again talks already migrated.")
+@click.option("-n", "--dry-run", is_flag=True)
+@click.option("--save", is_flag=True, help="datalad save the talks dataset afterwards.")
+@pass_config
+def talks_migrate(cfg: Config, ids, redo, dry_run, save):
+    """Copy reviewed talks (IDS, default all) to the talks dataset."""
+    try:
+        state = _talks_state(cfg)
+        inv = state.load()
+        talking.stamp_reviews(state, inv)
+        done = talking.migrate(state, cfg.talks_source, inv, list(ids) or None, redo=redo, dry_run=dry_run)
+        _talks_report(state, inv)
+        counts: dict[str, int] = {}
+        for cid, status, dest in done:
+            counts[status] = counts.get(status, 0) + 1
+            if status in ("migrated", "would migrate") and dest and (ids or redo or dry_run):
+                click.echo(f"{status} {cid} -> {dest}")
+        click.echo(", ".join(f"{n} {s}" for s, n in sorted(counts.items())))
+        if save and not dry_run:
+            vcs.save(state.dest, "talks: migrate from " + str(cfg.talks_source).replace(str(Path.home()), "~"))
+    except ERRORS as err:
+        fail(err)
+
+
+@talks.command("report")
+@pass_config
+def talks_report(cfg: Config):
+    """Rewrite MIGRATION.org."""
+    try:
+        state = _talks_state(cfg)
+        inv = state.load()
+        talking.stamp_reviews(state, inv)
+        _talks_report(state, inv)
+    except ERRORS as err:
+        fail(err)
+    click.echo(state.dest / "MIGRATION.org")
 
 
 def main() -> None:
