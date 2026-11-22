@@ -1,0 +1,76 @@
+#+title: myweb
+
+Author, build and deploy my web sites from a datalad dataset of org sources
+(~~/keep/web~).  See [[file:proposal.md]] and [[file:decisions.md]] for the
+design.
+
+* Site layout
+
+#+begin_example
+~/keep/web/
+  myweb.toml              taxa and targets, travels with the dataset
+  config/_default/        hugo config common to all targets
+  config/<environment>/   per target hugo config (baseURL, ...)
+  archetypes/<taxon>.org  templates for "myweb new" ($title, $date, $slug, ...)
+  themes/plain/           the theme, plain HTML, no JavaScript
+  content/<taxon>/<slug>/ one item, a Hugo leaf bundle:
+      <slug>.org            source, for taxa rendered by ox-hugo
+      index.md              exported by ox-hugo, committed
+      index.org             source, for taxa rendered by hugo (notes)
+      version.txt           version stamp, see "myweb version"
+      *.svg, *.png, ...     resources, linked relatively
+#+end_example
+
+Item metadata is in org keywords: ~#+title~, ~#+date~, ~#+hugo_tags~ (or
+~#+tags[]~), ~#+hugo_draft~ (or ~#+draft~), and:
+
+- ~#+audience:~ personal | work | both :: which targets get the item
+- ~#+visibility:~ public | unlisted | protected :: unlisted and protected
+  items are built but never listed (indices, RSS, sitemap) and carry
+  ~noindex~.  Protected items get an ~.htaccess~ and only go to targets with
+  ~auth = true~.
+
+Hugo can not filter on front matter so myweb writes an extra hugo config
+per build: content mount exclusions and cascades by path.
+
+* Commands
+
+#+begin_example
+myweb new posts "A Title" -t tag -d 2026-12-31   # draft, TODO in org-agenda
+myweb new notes "TIL" -m "One-liner note."
+myweb edit <item>       # Emacs + background "hugo server" with drafts + browser
+myweb status [-a]       # drafts: deadline, TODO, words, figures, ...
+myweb export [<item>]   # ox-hugo export of stale items
+myweb check <item>      # export, build to a check stage, link check; .check.txt
+myweb publish <item>    # undraft, export, save, stamp, tag, build, deploy
+myweb build [target]    # build to stage, .htaccess, verify, rsync to dest [and remote]
+myweb version [-u]      # show/update version.txt stamps
+myweb search ...        # passes to the configured search (orgface search)
+myweb setup systemd|cron|git [-T target] [--print]
+#+end_example
+
+* Version stamps
+
+A ~version.txt~ holds ~git describe~ of the last commit that touched what it
+covers, plus the commit hash.  All ~version.txt~ files are excluded from what
+any stamp covers, so committing stamps does not change them: a stamp changes
+iff its content does.  ~publish~ commits content, then stamps, then commits
+the stamps.
+
+* Configuration
+
+~~/.config/myweb/config.toml~ holds host specifics (site path, hugo and
+Emacs commands) and may override any ~[taxon.X]~ or ~[target.X]~ field of the
+site's ~myweb.toml~.  ~MYWEB_SITE~, ~MYWEB_HUGO~ and ~MYWEB_CONFIG~ override.
+
+Load ~src/myweb/myweb.el~ in Emacs so interactive ox-hugo exports (eg
+~org-hugo-auto-export-mode~) keep bundle links relative, as ~myweb export~
+does.  ~myweb edit~ loads it for you.
+
+* Development
+
+#+begin_example
+uv sync
+uv run pytest           # -m 'not emacs and not hugo' to skip integration
+uv run myweb
+#+end_example
