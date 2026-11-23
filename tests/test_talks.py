@@ -87,6 +87,10 @@ def test_copy_set(tree):
     live = [c for c in found.values() if not c.duplicate_of]
     files = talks.copy_set(tree, found["dune/2023/06/06/framework"], live)
     assert sorted(files) == ["fig.dot", "framework.org", "notes.org"]
+    # A candidate that is not a talk is material of the talk beside it.
+    files = talks.copy_set(tree, found["dune/2023/06/06/framework"],
+                           [c for c in live if c.stem != "striped"])
+    assert "striped.org" in files
     files = talks.copy_set(tree, found["dayabay/2009/04/01/upgrades/upgrades"], live)
     assert sorted(files) == ["others/theirs.odp", "upgrades.tex"]
 
@@ -123,15 +127,28 @@ def test_migrate_and_rescan(tree, tmp_path):
     assert not (dest / "dune/2023/06/06/framework/framework.aux").exists()
     assert not (dest / "dune/2023/06/06/framework/striped.org").exists()
 
-    # The owner accepts the ambiguous one at another date, rejects another.
-    talks.resolve(state, inv, "dune/2023/06/06/striped", "accept", note="fine", date_="2023-06-07")
+    # The owner accepts the ambiguous one at another date, in a realm.
+    talks.resolve(state, inv, "dune/2023/06/06/striped", "accept", note="fine", date_="2023-06-07", realm="edg")
     done = {cid: (status, d) for cid, status, d in talks.migrate(state, tree, inv)}
     assert done["dune/2023/06/06/striped"] == ("migrated", "dune/2023/06/07/striped")
-    assert json.loads((dest / "dune/2023/06/07/striped/talk.json").read_text())["date_source"] == "owner"
+    striped = json.loads((dest / "dune/2023/06/07/striped/talk.json").read_text())
+    assert striped["date_source"] == "owner" and (striped["visibility"], striped["access"]) == ("protected", "edg")
+    # Called material instead, it goes with framework when that is migrated
+    # again, and leaves again when no longer material.
+    talks.resolve(state, inv, "dune/2023/06/06/striped", "material", remove=True)
+    assert not (dest / "dune/2023/06/07/striped").exists()
+    talks.migrate(state, tree, inv, ["dune/2023/06/06/framework"], redo=True)
+    assert (dest / "dune/2023/06/06/framework/striped.org").exists()
+    talks.resolve(state, inv, "dune/2023/06/06/striped", "reject")
+    talks.migrate(state, tree, inv, ["dune/2023/06/06/framework"], redo=True)
+    assert not (dest / "dune/2023/06/06/framework/striped.org").exists()
     with pytest.raises(talks.TalksError):
-        talks.resolve(state, inv, "dune/2023/06/06/striped", None, topic="other")
+        talks.resolve(state, inv, "dune/2023/06/06/framework", None, topic="other")
     with pytest.raises(talks.TalksError):
         talks.resolve(state, inv, "wire-cell/topics/config/config", "reject")
+    talks.resolve(state, inv, "wire-cell/topics/config/config", "reject", remove=True)
+    assert not (dest / "wire-cell/2020/03/04/wct-configuration").exists()
+    assert inv["talks"]["wire-cell/topics/config/config"]["status"] == "rejected"
     talks.resolve(state, inv, "dayabay/2009/04/01/upgrades/upgrades", "reject", note="dup")
     talks.migrate(state, tree, inv)
     assert inv["talks"]["dayabay/2009/04/01/upgrades/upgrades"]["status"] == "rejected"
@@ -144,8 +161,8 @@ def test_migrate_and_rescan(tree, tmp_path):
     assert json.loads(path.read_text())["visibility"] == "protected"
 
     report = talks.report(state, inv)
-    assert "[X] ~dune/2023/06/06/framework~" in report and "[X] ~dune/2023/06/06/striped~" in report
-    assert "* Rejected by the owner (1)" in report
+    assert "[X] ~dune/2023/06/06/framework~" in report
+    assert "* Rejected by the owner (3)" in report
 
     # A changed source shows up on the next scan and its review goes stale.
     (tree / "dune/2023/06/06/framework.org").write_text(ORG.format(title="Frameworks 2", extra="x"))
@@ -175,6 +192,9 @@ def test_guidance_round_trip(tree, tmp_path):
     talks.write_report(state, inv)
     text = path.read_text()
     assert "  - use the path date\nreally." in text and "My overall plan." in text
+    assert not talks.harvest(state, inv)
+    # A change to the inventory between writing and reading is not guidance.
+    inv["talks"]["dune/2023/06/06/framework"]["problems"] = ["a new problem"]
     assert not talks.harvest(state, inv)
     # Deleting a note forgets it.
     path.write_text(text.replace("really.\n", ""))

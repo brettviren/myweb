@@ -448,24 +448,28 @@ def talks_migrate(cfg: Config, ids, redo, dry_run, save):
 @click.argument("ids", nargs=-1, required=True)
 @click.option("-a", "--accept", "action", flag_value="accept", help="Migrate despite the problems.")
 @click.option("-r", "--reject", "action", flag_value="reject", help="Never migrate.")
+@click.option("--material", "action", flag_value="material", help="Not a talk, but copy it with the talks beside it.")
 @click.option("--clear", "action", flag_value="clear", help="Forget an earlier accept or reject.")
 @click.option("-m", "--note", default="", help="Why, kept in the review.")
 @click.option("-d", "--date", "date_", default="", help="Date to use, YYYY-MM-DD.")
 @click.option("-t", "--topic", default="", help="Topic directory name to use.")
+@click.option("--remove", is_flag=True, help="With --reject or --material, remove a talk already migrated.")
+@click.option("--access", "realm", default="", help="Protect it in this access realm.")
 @click.option("--migrate/--no-migrate", default=True, show_default=True, help="Migrate what this makes ready.")
 @pass_config
-def talks_resolve(cfg: Config, ids, action, note, date_, topic, migrate):
+def talks_resolve(cfg: Config, ids, action, note, date_, topic, remove, realm, migrate):
     """Decide on talks listed in MIGRATION.org: IDS are their ~id~s."""
-    if not action and not (date_ or topic):
-        fail(ConfigError("give --accept, --reject, --clear, --date or --topic"))
+    if not action and not (date_ or topic or realm):
+        fail(ConfigError("give --accept, --reject, --material, --clear, --date, --topic or --access"))
     try:
         state = _talks_state(cfg)
         inv = _talks_load(state)
         for cid in ids:
-            talking.resolve(state, inv, cid, action, note=note, date_=date_, topic=topic)
+            talking.resolve(state, inv, cid, action, note=note, date_=date_, topic=topic, remove=remove, realm=realm)
         if migrate:
             for cid, status, dest in talking.migrate(state, cfg.talks_source, inv, list(ids)):
                 click.echo(f"{cid}: {status}" + (f" -> {dest}" if dest else ""))
+        state.save(inv)
         _talks_report(state, inv)
     except ERRORS as err:
         fail(err)

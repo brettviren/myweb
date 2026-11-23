@@ -47,6 +47,8 @@ GENERATED_EXT = {".aux", ".log", ".nav", ".snm", ".toc", ".out", ".vrb", ".fls",
 #: Directories holding other people's material, copied with a talk but
 #: never themselves holding a talk of the owner.
 OTHERS_DIRS = {"other", "others"}
+#: Directories of build products: anything found under one is a copy.
+BUILD_DIRS = {"build"}
 #: File stems that do not name a topic.
 GENERIC = {"notes", "talk", "slides", "presentation", "main", "index", "cut", "test", "short",
            "junk", "junk2", "readme", "draft", "new", "old", "tmp"}
@@ -353,6 +355,8 @@ def _candidate(root, reldir, parts, stem, exts, known) -> Candidate | None:
     cand = Candidate(id=cid, dir=reldir, stem=stem, pdf=pdf)
     if empty:
         cand.flags.append("empty-pdf")
+    if any(p in BUILD_DIRS for p in parts):
+        cand.flags.append("in-build-dir")
     if pdf:
         cand.files["pdf"] = pdf.path
     for ext, path in sources.items():
@@ -645,6 +649,8 @@ def needs_review(state: State, inv: dict) -> list[str]:
         if entry.get("gone") or cand.duplicate_of or "template" in cand.flags:
             continue
         rev = state.review(cid)
+        if rev is not None and rev.get("resolution") == "reject":
+            continue
         if rev is None or rev.get("fingerprint") != cand.fingerprint:
             out.append(cid)
     return sorted(out)
@@ -658,10 +664,14 @@ def decide(cand: Candidate, review: dict | None) -> tuple[str, list[str]]:
         return "template", []
     if cand.duplicate_of:
         return "duplicate", []
+    if "in-build-dir" in cand.flags:
+        return "rejected", ["under a build/ directory"]
     if review is None:
         return "unreviewed", []
     if review.get("resolution") == "reject":
         return "rejected", [review.get("resolution_note") or "rejected by owner"]
+    if review.get("resolution") == "material":
+        return "material", []
     if review.get("resolution") == "accept":
         return ("ready", []) if cand.group and (review.get("date") or cand.date) else \
             ("ambiguous", ["accepted but has no group or date; give --date"])
@@ -679,21 +689,28 @@ def decide(cand: Candidate, review: dict | None) -> tuple[str, list[str]]:
     return "ready", []
 
 
-RESOLUTIONS = ("accept", "reject", "clear")
+RESOLUTIONS = ("accept", "reject", "material", "clear")
 
 
 def resolve(state: State, inv: dict, cid: str, action: str | None, note: str = "",
-            date_: str = "", topic: str = "") -> dict:
+            date_: str = "", topic: str = "", remove: bool = False, realm: str = "") -> dict:
     """Record the owner's decision on a candidate in its review: accept
-    (migrate despite problems), reject (never migrate), clear (undo) or
+    (migrate despite problems), reject (never migrate), material (not a
+    talk, but copied with the talks beside it), clear (undo) or
     None (keep any earlier decision).  DATE and TOPIC override where it goes, if it is not yet migrated."""
     if cid not in inv["talks"]:
         raise TalksError(f"no talk candidate {cid!r}")
     if action is not None and action not in RESOLUTIONS:
         raise TalksError(f"resolution must be one of {RESOLUTIONS}")
     entry = inv["talks"][cid]
-    if action == "reject" and entry.get("status") == "migrated":
-        raise TalksError(f"{cid} is migrated to {entry.get('dest')}; remove that first")
+    if action in ("reject", "material") and entry.get("status") == "migrated":
+        if not remove:
+            raise TalksError(f"{cid} is migrated to {entry.get('dest')}; give --remove to remove it")
+        target = state.dest / entry["dest"]
+        if target.is_dir():
+            shutil.rmtree(target)
+        entry["status"] = "rejected" if action == "reject" else "material"
+        entry["removed"] = entry.pop("dest")
     if (date_ or topic) and entry.get("status") == "migrated":
         raise TalksError(f"{cid} is migrated to {entry.get('dest')}; move it there instead")
     if date_ and not parse_loose_date(date_):
@@ -710,6 +727,13 @@ def resolve(state: State, inv: dict, cid: str, action: str | None, note: str = "
         review["date"] = parse_loose_date(date_)
     if topic:
         review["topic_slug"] = slug(topic)
+    if realm:
+        review["visibility"], review["access"] = "protected", realm
+        if entry.get("status") == "migrated":  # talk.json is the one read
+            tj = state.dest / entry["dest"] / "talk.json"
+            data = json.loads(tj.read_text())
+            data.update(visibility="protected", access=realm)
+            tj.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n")
     path = state.review_path(cid)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(review, indent=1, ensure_ascii=False) + "\n")
@@ -718,8 +742,9 @@ def resolve(state: State, inv: dict, cid: str, action: str | None, note: str = "
 
 def copy_set(root: Path, cand: Candidate, others: list[Candidate]) -> list[str]:
     """Relative paths (under the candidate's dir) to copy for a talk: its
-    directory less generated files, other talks' own files and any
-    subdirectory holding another talk."""
+    directory less generated files, the own files of the OTHERS (every
+    other candidate but those the owner calls material of a talk) and
+    any subdirectory holding one of them."""
     folder = root / cand.dir
     other_files = {Path(p).name for o in others if o.dir == cand.dir and o.id != cand.id
                    for p in o.files.values()}
@@ -781,6 +806,7 @@ def talk_json(cand: Candidate, review: dict, copied: list[str]) -> dict:
                                                   "producer", "created", "mtime", "md5")} if pdf else {},
         "source_date": cand.source_date,
         "flags": cand.flags,
+        **{k: review[k] for k in KEPT_FIELDS if review.get(k) not in (None, "")},
         "migration": {"version": VERSION, "reviewed_by": review.get("reviewed_by", ""),
                       "at": datetime.now(timezone.utc).isoformat(timespec="seconds")},
     }
@@ -791,7 +817,14 @@ def migrate(state: State, root: Path, inv: dict, ids: list[str] | None = None,
             redo: bool = False, dry_run: bool = False) -> list[tuple[str, str, str]]:
     """Copy ready talks to their destination.  Return (id, status, dest)."""
     cands = candidates(inv)
-    live = [c for cid, c in cands.items() if not inv["talks"][cid].get("gone") and not c.duplicate_of]
+    live = []  # candidates whose files are their own, not material of others
+    for cid, c in cands.items():
+        e = inv["talks"][cid]
+        if e.get("gone") or c.duplicate_of:
+            continue
+        rev = state.review(cid)
+        if not (rev and rev.get("resolution") == "material"):
+            live.append(c)
     out = []
     for cid, cand in sorted(cands.items()):
         entry = inv["talks"][cid]
@@ -800,8 +833,8 @@ def migrate(state: State, root: Path, inv: dict, ids: list[str] | None = None,
         if entry.get("gone"):
             continue
         review = state.review(cid)
-        if review and review.get("fingerprint") != cand.fingerprint:
-            review = None  # stale
+        if review and review.get("fingerprint") != cand.fingerprint and review.get("resolution") != "reject":
+            review = None  # stale, except that a rejection stands
         status, problems = decide(cand, review)
         entry["problems"] = problems
         if status != "ready":
@@ -838,9 +871,13 @@ def migrate(state: State, root: Path, inv: dict, ids: list[str] | None = None,
             data = talk_json(cand, review, copied)
             old = target / "talk.json"
             if old.exists():
-                # Keep what a person set for the web (see talkpages.py).
+                # Keep what a person set for the web (see talkpages.py),
+                # drop what an earlier migration copied but this does not.
                 kept = json.loads(old.read_text())
                 data.update({k: kept[k] for k in KEPT_FIELDS if k in kept})
+                for rel in set(kept.get("files", [])) - set(copied):
+                    if (target / rel).is_file() or (target / rel).is_symlink():
+                        (target / rel).unlink()
             old.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n")
             entry.update(status="migrated", dest=dest, version=VERSION,
                          migrated=datetime.now(timezone.utc).isoformat(timespec="seconds"))
@@ -858,7 +895,8 @@ def _home(path: str) -> str:
 
 
 REPORT = "MIGRATION.org"
-ITEM_LINE = re.compile(r"^- \[[ X]\] ~(.+?)~")
+REPORT_BASE = "report-base.org"
+ITEM_LINE = re.compile(r"^- \[[ X]\] ~(.+?)~(?= ::| →|$)")
 HEADING_LINE = re.compile(r"^\* (.+?)(?: \(\d+\))?\s*$")
 TOP = "_top"
 
@@ -893,7 +931,10 @@ def harvest(state: State, inv: dict) -> bool:
     if not path.exists():
         return False
     have = path.read_text().splitlines()
-    made = report(state, inv, guidance=False).splitlines()
+    # Compare with what was last written, not what would be written now:
+    # the inventory may have changed since.
+    base = state.dir / REPORT_BASE
+    made = (base.read_text() if base.exists() else report(state, inv, guidance=False)).splitlines()
     anchors = _anchors(have)
     found: dict[str, list[str]] = {}
     for tag, _, _, j1, j2 in difflib.SequenceMatcher(None, made, have, autojunk=False).get_opcodes():
@@ -916,8 +957,12 @@ def harvest(state: State, inv: dict) -> bool:
 
 
 def write_report(state: State, inv: dict) -> Path:
+    """Write MIGRATION.org, and beside the inventory the same without
+    guidance, which harvest compares the file with."""
     path = state.dest / REPORT
     path.write_text(report(state, inv))
+    state.dir.mkdir(parents=True, exist_ok=True)
+    (state.dir / REPORT_BASE).write_text(report(state, inv, guidance=False))
     return path
 
 
@@ -953,6 +998,7 @@ def report(state: State, inv: dict, guidance: bool = True) -> str:
          "Not migrated.  Say what to do with each; problems are from the scan and the review."),
         ("not-a-talk", "Judged not to be talks", "Not migrated.  Correct any that are talks."),
         ("rejected", "Rejected by the owner", ""),
+        ("material", "Material of other talks", "Not talks; copied with the talks in their directory."),
         ("unreviewed", "Not yet reviewed", ""),
         ("found", "Not yet reviewed", ""),
         ("changed", "Changed since migration", "Source changed; review and migrate again."),
