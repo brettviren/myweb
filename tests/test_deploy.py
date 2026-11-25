@@ -76,6 +76,7 @@ def test_top_htaccess(tmp_path):
     text = deploy.top_htaccess(tgt, files).read_text()
     assert 'AddType "text/plain; charset=utf-8" .org' in text
     assert '<FilesMatch "\\.(css|html|pdf)$">' in text
+    assert "Require all granted" in text and "Allow from all" in text
     tgt.org_type, tgt.allow_files = "", False
     assert deploy.top_htaccess(tgt, files) is None and not (files / ".htaccess").exists()
 
@@ -86,3 +87,4 @@ def test_protected_htaccess_requires_files_too():
     text = access.htaccess(tgt, access.Realm("edg", "user edg"), "page x")
     assert text.count("Require user edg") == 2
     assert '<FilesMatch "">' in text
+    assert text.count("Satisfy All") == 2

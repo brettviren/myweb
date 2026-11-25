@@ -36,14 +36,28 @@ AuthUserFile {htpasswd}
 Require {require}
 # Files sections merge after directories, so a FilesMatch granting file
 # types higher up (see grant) would otherwise override the Require above.
+# A server's "Satisfy Any" would let a granted host admit without login.
 <FilesMatch "">
   Require {require}
+  <IfModule mod_access_compat.c>
+    Satisfy All
+  </IfModule>
 </FilesMatch>
+<IfModule mod_access_compat.c>
+  Satisfy All
+</IfModule>
 """
 
-GRANT = """# Written by myweb: the server admits only some file types; admit these.
+#: Both 2.4 Require and, for a server denying by the old Order/Deny of
+#: mod_access_compat, which Require can not lift, an Allow.
+GRANT = """\
+# Written by myweb: the server admits only some file types; admit these.
 <FilesMatch "\\.({types})$">
   Require all granted
+  <IfModule mod_access_compat.c>
+    Order deny,allow
+    Allow from all
+  </IfModule>
 </FilesMatch>
 """
 
