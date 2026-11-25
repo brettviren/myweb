@@ -33,14 +33,14 @@ def test_build_deploy_and_check(hugo_site, tmp_path):
     (dest / "drop").mkdir(parents=True)
     (dest / "drop" / "keepme").write_text("x")
 
-    result = deploy.build(cfg, cfg.target("personal"), dest=dest)
+    result = deploy.deploy(cfg, cfg.target("personal"), dest=dest)
     assert (dest / "posts" / "pub" / "index.html").exists()
     assert not (dest / "posts" / "secret").exists()
     assert not (dest / "posts" / "work").exists()
     assert (dest / "drop" / "keepme").exists()
     assert result.synced == [str(dest)]
 
-    deploy.build(cfg, cfg.target("all"), dest=dest)
+    deploy.deploy(cfg, cfg.target("all"), dest=dest)
     htaccess = dest / "posts" / "secret" / ".htaccess"
     assert "AuthUserFile /srv/htpasswd" in htaccess.read_text()
     assert "secret" not in (dest / "posts" / "index.html").read_text()
@@ -65,7 +65,7 @@ def test_sources_and_anchors(hugo_site, tmp_path):
     assert ":CUSTOM_ID: first-part" in (path / "sec.org").read_text()
 
     dest = tmp_path / "public_html"
-    deploy.build(cfg, cfg.target("personal"), dest=dest)
+    deploy.deploy(cfg, cfg.target("personal"), dest=dest)
     assert 'id="first-part"' in (dest / "posts" / "sec" / "index.html").read_text()
     assert 'id="a-note-part"' in (dest / "notes" / "n1" / "index.html").read_text()
     published = (dest / "posts" / "sec" / "sec.org").read_text()

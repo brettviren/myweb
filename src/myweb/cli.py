@@ -239,24 +239,7 @@ def publish(cfg: Config, item, targets, no_commit, no_deploy):
         click.echo(f"deployed {result.target.name}: {', '.join(result.synced) or result.stage}")
 
 
-@cli.command()
-@click.argument("target_name", default="local")
-@click.option("-d", "--dest", type=click.Path(file_okay=False, path_type=Path), help="Local directory instead of the target's dest.")
-@click.option("-r", "--rsync", "remote", help="rsync destination (host:path) instead of the target's.")
-@click.option("--drafts", is_flag=True, help="Include drafts.")
-@click.option("--no-export", is_flag=True, help="Do not export stale ox-hugo items first.")
-@click.option("--stage-only", is_flag=True, help="Build and check the stage, do not sync.")
-@click.option("-q", "--quiet", is_flag=True)
-@pass_config
-def build(cfg: Config, target_name, dest, remote, drafts, no_export, stage_only, quiet):
-    """Build TARGET (default local) and sync it to its destination(s)."""
-    try:
-        result = deploy.build(
-            cfg, cfg.target(target_name), dest=dest, remote=remote, drafts=drafts,
-            do_export=not no_export, sync=not stage_only,
-        )
-    except ERRORS as err:
-        fail(err)
+def _report(result: deploy.Result, quiet: bool) -> None:
     for line in result.warnings:
         click.echo(f"warning: {line}", err=True)
     if quiet:
@@ -272,9 +255,54 @@ def build(cfg: Config, target_name, dest, remote, drafts, no_export, stage_only,
     for line in result.log.splitlines():
         if line.startswith(("WARN", "ERROR")):
             click.echo(line, err=True)
-    click.echo(f"built {len(result.plan.included)} items and {len(result.plan.talks)} talks to {result.stage}")
-    for where in result.synced:
-        click.echo(f"synced to {where}")
+    click.echo(f"built {result.target.name}: {len(result.plan.included)} items "
+               f"and {len(result.plan.talks)} talks to {result.stage}")
+
+
+@cli.command()
+@click.argument("target_name", default="local")
+@click.option("--drafts", is_flag=True, help="Include drafts.")
+@click.option("--no-export", is_flag=True, help="Do not export stale ox-hugo items first.")
+@click.option("-q", "--quiet", is_flag=True)
+@pass_config
+def build(cfg: Config, target_name, drafts, no_export, quiet):
+    """Build TARGET (default local) to its stage and check it, deploying nothing."""
+    try:
+        result = deploy.build(cfg, cfg.target(target_name), drafts=drafts, do_export=not no_export)
+    except ERRORS as err:
+        fail(err)
+    _report(result, quiet)
+
+
+@cli.command("deploy", no_args_is_help=True)
+@click.argument("target_names", nargs=-1)
+@click.option("-a", "--all", "every", is_flag=True, help="Deploy the configured publish_targets.")
+@click.option("-d", "--dest", type=click.Path(file_okay=False, path_type=Path), help="Local directory instead of the target's dest.")
+@click.option("-r", "--rsync", "remote", help="rsync destination (host:path) instead of the target's.")
+@click.option("--drafts", is_flag=True, help="Include drafts.")
+@click.option("--no-export", is_flag=True, help="Do not export stale ox-hugo items first.")
+@click.option("-q", "--quiet", is_flag=True)
+@pass_config
+def deploy_(cfg: Config, target_names, every, dest, remote, drafts, no_export, quiet):
+    """Build each TARGET and deploy it by its configured methods.
+
+    A target deploys by each of its settings, in order: "dest", a local
+    directory; "rsync", a host:path receiving dest (else the build); "git",
+    a repository URL whose "branch" receives the build as a new commit.
+    """
+    names = list(target_names) or (cfg.publish_targets if every else [])
+    if not names:
+        fail("name a TARGET or give --all")
+    try:
+        targets = [cfg.target(n) for n in names]
+        for target in targets:
+            result = deploy.build(cfg, target, drafts=drafts, do_export=not no_export)
+            _report(result, quiet)
+            deploy.ship(cfg, result, dest, remote)
+            for where in result.synced:
+                click.echo(f"deployed {target.name} to {where}")
+    except ERRORS as err:
+        fail(err)
 
 
 @cli.command()
@@ -313,7 +341,7 @@ def search(cfg: Config, args):
 @click.option("--unitdir", type=click.Path(file_okay=False, path_type=Path), default=Path("~/.config/systemd/user").expanduser(), show_default=True)
 @pass_config
 def setup(cfg: Config, method, target_name, when, just_print, force, unitdir):
-    """Arrange for "myweb build TARGET" to run by systemd, cron or git hook.
+    """Arrange for "myweb deploy TARGET" to run by systemd, cron or git hook.
 
     systemd: a user service, a timer and a path unit that fires when the
     site's branch moves.  cron: a crontab line.  git: post-commit,
@@ -340,7 +368,7 @@ def setup(cfg: Config, method, target_name, when, just_print, force, unitdir):
         for path in setting.write(units, force=force):
             click.echo(f"wrote {path}")
         if method == "systemd":
-            name = f"myweb-build-{target_name}"
+            name = f"myweb-deploy-{target_name}"
             click.echo(f"enable with: systemctl --user daemon-reload && "
                        f"systemctl --user enable --now {name}.timer {name}.path")
     except ERRORS as err:

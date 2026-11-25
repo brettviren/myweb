@@ -87,7 +87,7 @@ def test_version_stamp(cfg, site):
 def test_setup_text(cfg):
     units = setup.systemd(cfg, "all", "hourly", cfg.site / "units")
     assert [u.path.suffix for u in units] == [".service", ".timer", ".path"]
-    assert "build all" in units[0].text
+    assert "deploy all" in units[0].text
     assert "PathChanged=" in units[2].text
     hooks = setup.git_hooks(cfg, "all")
     paths = setup.write(hooks)

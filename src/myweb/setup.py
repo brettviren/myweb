@@ -1,4 +1,4 @@
-"""Arrange for "myweb build" to run unattended: systemd, cron or git hook.
+"""Arrange for "myweb deploy" to run unattended: systemd, cron or git hook.
 
 Each method makes text from the running myweb's own command so the
 installed job runs the same program.
@@ -30,13 +30,13 @@ def myweb_command() -> list[str]:
     return [exe] if exe else [sys.executable, "-m", "myweb"]
 
 
-def build_command(target: str) -> str:
-    return shlex.join([*myweb_command(), "build", target])
+def deploy_command(target: str) -> str:
+    return shlex.join([*myweb_command(), "deploy", target])
 
 
 def systemd(cfg: Config, target: str, when: str, unitdir: Path) -> list[Unit]:
     """A service, a timer and a path unit watching the site's branch head."""
-    name = f"myweb-build-{target}"
+    name = f"myweb-deploy-{target}"
     head = cfg.site / ".git" / "HEAD"
     ref = (cfg.site / ".git" / head.read_text().split(":", 1)[1].strip()
            if head.exists() and head.read_text().startswith("ref:") else head)
@@ -50,7 +50,7 @@ Type=oneshot
 WorkingDirectory={cfg.site}
 # Unattended jobs need to find hugo (uvx), emacs and rsync as you do.
 Environment=PATH={os.environ.get("PATH", "")}
-ExecStart={build_command(target)}
+ExecStart={deploy_command(target)}
 """
     timer = f"""\
 {MARK}
@@ -85,7 +85,7 @@ WantedBy=default.target
 
 def cron_line(target: str, when: str) -> str:
     path = shlex.quote(os.environ.get("PATH", ""))
-    return f"{when} PATH={path} {build_command(target)} >/dev/null 2>&1 {MARK} {target}"
+    return f"{when} PATH={path} {deploy_command(target)} >/dev/null 2>&1 {MARK} {target}"
 
 
 def install_cron(line: str, target: str) -> str:
@@ -107,7 +107,7 @@ def git_hooks(cfg: Config, target: str) -> list[Unit]:
 # Build the {target} site in the background so git is not held up.
 unset GIT_DIR GIT_WORK_TREE
 cd {shlex.quote(str(cfg.site))} || exit 0
-nohup flock -n .git/myweb-build.lock {build_command(target)} >> .git/myweb-build.log 2>&1 &
+nohup flock -n .git/myweb-deploy.lock {deploy_command(target)} >> .git/myweb-deploy.log 2>&1 &
 """
     return [Unit(hooks / name, body) for name in ("post-commit", "post-merge", "post-receive")]
 

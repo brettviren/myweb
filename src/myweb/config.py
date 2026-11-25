@@ -74,8 +74,16 @@ class Target:
     htpasswd: str = ""
     #: Local directory receiving the build.
     dest: Path | None = None
-    #: Optional rsync destination ("host:path/") receiving dest.
+    #: Optional rsync destination ("host:path/") receiving dest, else the stage.
     rsync: str = ""
+    #: Optional git repository URL whose branch receives the stage as a commit.
+    git: str = ""
+    branch: str = "gh-pages"
+    #: Extra files written at the top of the build, path to text, eg
+    #: {".nojekyll" = "", CNAME = "example.org"} for GitHub Pages.
+    files: dict[str, str] = field(default_factory=dict)
+    #: Whether the target gets talks at all (then by audience as pages).
+    talks: bool = True
     #: Paths in dest (and rsync) that a build must not delete.
     keep: list[str] = field(default_factory=lambda: ["drop/"])
     base_url: str = ""
@@ -180,6 +188,14 @@ def _target(name: str, cfg: dict) -> Target:
     tgt.auth = bool(cfg.get("auth", tgt.auth))
     tgt.htpasswd = str(cfg.get("htpasswd", ""))
     tgt.rsync = str(cfg.get("rsync", ""))
+    tgt.git = str(cfg.get("git", ""))
+    tgt.branch = str(cfg.get("branch", tgt.branch))
+    tgt.talks = bool(cfg.get("talks", tgt.talks))
+    if "files" in cfg:
+        tgt.files = {str(k): str(v) for k, v in cfg["files"].items()}
+    for path in tgt.files:
+        if Path(path).is_absolute() or ".." in Path(path).parts:
+            raise ConfigError(f"target {name}: file {path!r} must be relative to the site top")
     tgt.base_url = str(cfg.get("base_url", ""))
     tgt.org_type = str(cfg.get("org_type", tgt.org_type))
     if "realms" in cfg:
@@ -190,6 +206,11 @@ def _target(name: str, cfg: dict) -> Target:
     if cfg.get("dest"):
         tgt.dest = expand(cfg["dest"])
     return tgt
+
+
+def methods(target: Target) -> list[str]:
+    """How TARGET is deployed, in order: "dest", "rsync", "git"."""
+    return [m for m in ("dest", "rsync", "git") if getattr(target, m)]
 
 
 def load(

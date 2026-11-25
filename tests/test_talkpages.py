@@ -50,7 +50,7 @@ def test_build_talks(hugo_site, tmp_path):
     add_post(cfg, "pub")
     dest = tmp_path / "www"
 
-    deploy.build(cfg, cfg.target("all"), dest=dest)
+    deploy.deploy(cfg, cfg.target("all"), dest=dest)
     assert (dest / "talks/dune/2023/06/06/fw/t.pdf").read_bytes().endswith(b"fw")
     assert "Require valid-user" in (dest / "talks/dune/2023/07/01/secret/.htaccess").read_text()
     listing = (dest / "talks/index.html").read_text()
@@ -69,10 +69,19 @@ def test_build_talks(hugo_site, tmp_path):
     plan = hugo.plan(cfg, cfg.target("personal"))
     assert [t.dest for t in plan.talks] == ["edg/2020/01/02/mine", "dune/2023/06/06/fw"] or \
         sorted(t.dest for t in plan.talks) == ["dune/2023/06/06/fw", "edg/2020/01/02/mine"]
-    deploy.build(cfg, cfg.target("personal"), dest=tmp_path / "p")
+    deploy.deploy(cfg, cfg.target("personal"), dest=tmp_path / "p")
     assert not (tmp_path / "p/talks/dune/2023/07/01/secret").exists()
 
     # A newly migrated talk appears on the next build.
     add_talk(root, "dune/2024/01/01/new")
-    deploy.build(cfg, cfg.target("all"), dest=dest)
+    deploy.deploy(cfg, cfg.target("all"), dest=dest)
     assert (dest / "talks/dune/2024/01/01/new/index.html").exists()
+
+
+def test_plan_without_talks(cfg):
+    add_talk(cfg.talks_dest, "dune/2023/06/06/fw")
+    cfg.talks = {"audience": "both"}
+    tgt = cfg.target("personal")
+    assert [t.dest for t in hugo.plan(cfg, tgt).talks] == ["dune/2023/06/06/fw"]
+    tgt.talks = False
+    assert hugo.plan(cfg, tgt).talks == []

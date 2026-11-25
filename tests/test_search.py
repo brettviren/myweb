@@ -54,7 +54,7 @@ def test_indexes_by_realm(hugo_site, tmp_path):
     (path / "duneonly.org").write_text(text)
 
     dest = tmp_path / "www"
-    deploy.build(cfg, tgt, dest=dest)
+    deploy.deploy(cfg, tgt, dest=dest)
     load = lambda p: [e["url"] for e in json.loads((dest / p).read_text())["pages"]]
     assert load("search/index.json") == ["posts/pub/"]
     assert load("search/protected/index.json") == ["posts/prot/"]
@@ -67,7 +67,7 @@ def test_indexes_by_realm(hugo_site, tmp_path):
 
     # A target without the dune realm does not build the page at all.
     del tgt.realms["dune"]
-    deploy.build(cfg, tgt, dest=dest)
+    deploy.deploy(cfg, tgt, dest=dest)
     assert not (dest / "posts/duneonly").exists() and not (dest / "search/dune").exists()
 
 

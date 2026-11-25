@@ -78,7 +78,7 @@ def plan(cfg: Config, target: Target, drafts: bool = False) -> Plan:
             continue
         result.included.append(bundle)
         _admit(result, bundle, meta)
-    for talk in talkpages.load(cfg.talks_dest, cfg.talks):
+    for talk in talkpages.load(cfg.talks_dest, cfg.talks) if target.talks else []:
         if why := _why_not(target, talk.meta, drafts):
             result.talks_excluded.append((talk, why))
             continue

@@ -126,5 +126,5 @@ def publish(
             vcs.tag(site, result.tag, f"publish {bundle.name} revision {num}")
     if deploy_it:
         for name in targets or cfg.publish_targets:
-            result.results.append(deploy.build(cfg, cfg.target(name)))
+            result.results.append(deploy.deploy(cfg, cfg.target(name)))
     return result

@@ -47,7 +47,7 @@ as the target's ~org_type~ (default ~text/plain; charset=utf-8~, needs
 * Search and access realms
 
 Site search runs in the reader's browser over static JSON indexes that
-~myweb build~ writes after hugo, so a reader can search exactly what the
+~myweb build~ (and ~deploy~) writes after hugo, so a reader can search exactly what the
 web server lets them fetch.  There is no server side to trust.
 
 Every page is in one access realm: ~public~, or for a protected page the
@@ -113,7 +113,7 @@ Every ~talk.json~ in the talks dataset is a page at
 ~talks/<group>/<YYYY>/<MM>/<DD>/<topic>/~ with its summary, venue, authors
 and PDF; nothing is generated into the site dataset.  Each build writes
 the talks a target gets to the cache and mounts them as ~content/talks~,
-so a newly migrated talk appears on the next ~myweb build~.
+so a newly migrated talk appears on the next ~myweb deploy~.
 
 - taxonomies :: ~groups~, ~topics~ (topic and series), ~tags~ (keywords)
 - ~/talks/~ :: all listed talks by year, with a fuzzy filter and group and
@@ -130,8 +130,51 @@ Resolving ~MIGRATION.org~:
 #+begin_example
 myweb talks resolve <id> --accept [-m why] [-d YYYY-MM-DD] [-t topic]
 myweb talks resolve <id> --reject [-m why]
-myweb build
+myweb deploy local
 #+end_example
+
+* Deploying
+
+~myweb build <target>~ builds a target to its stage
+(~~/.cache/myweb/stage/<target>~) and checks it.  ~myweb deploy
+<target>...~ (or ~--all~ for ~publish_targets~) builds and then sends the
+stage by each method the target sets, in this order:
+
+- ~dest~ :: a local directory, by ~rsync --delete~ (eg ~~/public_html~)
+- ~rsync~ :: a ~host:path/~, from ~dest~ if set, else from the stage
+- ~git~ :: a repository URL; its ~branch~ (default ~gh-pages~) gets the
+  stage as one new commit, pushed.  A plain git work tree in
+  ~~/.cache/myweb/deploy/<target>~ follows the remote branch.
+
+Paths in ~keep~ (default ~drop/~) are never deleted at any destination.
+Extra ~files~ are written at the top of the build.
+
+The built stage holds plain files, talk PDFs copied out of the annex, so
+no destination needs git-annex or datalad.  Which items a target gets is
+the item's ~#+audience:~ (and a talk's): ~personal~ goes only to targets
+serving personal, ~work~ only to work, ~both~ to each.  ~talks = false~
+keeps every talk off a target.  A theme menu entry whose page was not
+built is left out.
+
+The site's ~myweb.toml~ says what each target gets; the host's
+~config.toml~ says where it goes from this host:
+
+#+begin_src toml
+[target.github]                 # myweb.toml
+audience = ["personal", "both"]
+auth = false                    # GitHub Pages reads no .htaccess
+talks = false
+org_type = ""
+keep = []
+branch = "master"
+[target.github.files]
+".nojekyll" = ""                # no Jekyll pass over the built site
+
+[target.github]                 # ~/.config/myweb/config.toml
+git = "git@github.com:brettviren/brettviren.github.io.git"
+[target.work]
+rsync = "hierocles:public_html/"
+#+end_src
 
 * Commands
 
@@ -144,7 +187,8 @@ myweb export [<item>]   # ox-hugo export of stale items
 myweb ids <item>|-a [-n] [--commit]  # slug CUSTOM_ID for every headline
 myweb check <item>      # export, build to a check stage, link check; .check.txt
 myweb publish <item>    # undraft, export, save, stamp, tag, build, deploy
-myweb build [target]    # build to stage, .htaccess, verify, rsync to dest [and remote]
+myweb build [target]    # build to stage, .htaccess, search, verify
+myweb deploy <target>...|-a  # build, then to dest, rsync and/or git push
 myweb version [-u]      # show/update version.txt stamps
 myweb search ...        # passes to the configured search (orgface search)
 myweb setup systemd|cron|git [-T target] [--print]
