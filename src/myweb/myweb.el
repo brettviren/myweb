@@ -26,6 +26,21 @@ directory, which is wrong when the org source itself lives in the bundle."
 
 (advice-add 'org-hugo--attachment-rewrite-maybe :around #'myweb--bundle-relative)
 
+;; [[site:tmp/][tmp]] links a path of the deployed site that no org file
+;; makes: generated sections (talks/, artifacts/) or areas other tools
+;; fill (tmp/).  It exports root-relative, which the theme's link hook
+;; puts under the site's base URL.
+
+(defun myweb--site-link-export (path desc backend &optional _info)
+  "Export a site: link to PATH with DESC for BACKEND."
+  (let ((url (concat "/" (string-remove-prefix "/" path)))
+        (text (or desc path)))
+    (cond ((org-export-derived-backend-p backend 'md) (format "[%s](%s)" text url))
+          ((org-export-derived-backend-p backend 'html) (format "<a href=\"%s\">%s</a>" url text))
+          (t url))))
+
+(org-link-set-parameters "site" :export #'myweb--site-link-export)
+
 (defun myweb-export-file (file)
   "Export org FILE with ox-hugo, never evaluating source blocks."
   (let ((org-export-use-babel nil)

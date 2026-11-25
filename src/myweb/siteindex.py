@@ -103,7 +103,7 @@ def indexes(target: Target, plan: Plan, stage: Path) -> dict[str, Index]:
         realm = access.index_realm(target, plan.meta[item.name])
         if realm is None:
             continue
-        page = stage / item.url_path / "index.html"
+        page = stage / item.url_path / getattr(item, "entry", "index.html")
         if not page.exists():
             continue
         title, text = page_text(page.read_text(errors="replace"))

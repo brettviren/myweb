@@ -51,8 +51,9 @@ Require {require}
 #: Both 2.4 Require and, for a server denying by the old Order/Deny of
 #: mod_access_compat, which Require can not lift, an Allow.
 GRANT = """\
-# Written by myweb: the server admits only some file types; admit these.
-<FilesMatch "\\.({types})$">
+# Written by myweb: the server admits only some file types; admit these,
+# never dotfiles (.htaccess, .htpasswd, drop's .htdrop-*.json).
+<FilesMatch "^[^.].*\\.({types})$">
   Require all granted
   <IfModule mod_access_compat.c>
     Order deny,allow
@@ -109,3 +110,12 @@ def file_types(root: Path) -> list[str]:
     """The extensions of the non-hidden files under ROOT."""
     return sorted({p.suffix[1:] for p in root.rglob("*")
                    if p.is_file() and p.suffix and not p.name.startswith(".")})
+
+
+def defaults(settings: dict, group: str, base: dict) -> dict:
+    """Audience, visibility and access of a generated page (a talk, an
+    artifact): BASE, then SETTINGS, then SETTINGS["group"][GROUP]."""
+    out = dict(base)
+    out.update({k: v for k, v in settings.items() if k in out})
+    out.update({k: v for k, v in (settings.get("group", {}).get(group) or {}).items() if k in out})
+    return out

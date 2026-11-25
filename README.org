@@ -142,6 +142,39 @@ myweb talks resolve <id> --reject [-m why]
 myweb deploy local
 #+end_example
 
+* Artifacts
+
+An artifact is a tree of ready-made files, often LLM made HTML, served as
+it is at ~artifacts/<path>/~: any directory under ~<site>/artifacts/~
+holding an ~artifact.toml~:
+
+#+begin_src toml
+title = "Field response study"
+date = 2026-11-25
+summary = "Interactive plots of ..."
+tags = ["dune"]               # listed in the tags taxonomy, as any page
+entry = "index.html"          # the file listings link (default)
+# audience, visibility, access and draft as for any page
+#+end_src
+
+Hugo renders none of it: myweb copies the tree (less ~artifact.toml~) to
+the build and writes a ~render = "link"~ page per artifact for the
+~/artifacts/~ listing, related lists and search.  An artifact's group is
+its top directory when nested, and defaults come from ~[artifacts]~ of
+~myweb.toml~, per group from ~[artifacts.group.<name>]~, so one realm on a
+group protects a whole tree of artifacts with one password.  A protected
+artifact gets the realm's ~.htaccess~ at its top, which covers its tree.
+Artifacts may not nest.
+
+* Links to what org does not make
+
+Org resolves ~[[posts/]]~ or ~[[notes]]~ as local files or headings and
+fails the export when none exists.  Link site sections as ~[[/posts][posts]]~
+(the theme puts root links under the base URL), and paths no org file makes
+(~artifacts/~, ~talks/~, areas such as ~tmp/~) as ~[[site:artifacts/][artifacts]]~.
+An area only some targets have (~tmp/~ is not on GitHub) is best linked by
+its full URL.  ~myweb check~ accepts links into a target's ~keep~ paths.
+
 * Deploying
 
 ~myweb build <target>~ builds a target to its stage

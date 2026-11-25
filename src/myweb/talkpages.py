@@ -21,11 +21,13 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .access import defaults
 from .orgmeta import Meta
 
 SECTION = "talks"
 #: talk.json fields the web build reads and talks.migrate keeps on --redo.
 ACCESS_FIELDS = ("audience", "visibility", "access", "draft")
+DEFAULTS = {"audience": "work", "visibility": "public", "access": ""}
 
 
 class TalkError(Exception):
@@ -64,13 +66,6 @@ class Talk:
                 "authors": d.get("authors") or [], "summary": d.get("summary", "")}
 
 
-def _defaults(settings: dict, group: str) -> dict:
-    out = {"audience": "work", "visibility": "public", "access": ""}
-    out.update({k: v for k, v in settings.items() if k in out})
-    out.update({k: v for k, v in (settings.get("group", {}).get(group) or {}).items() if k in out})
-    return out
-
-
 def load(dest: Path, settings: dict | None = None) -> list[Talk]:
     """Every talk.json in the talks dataset DEST, sorted by date."""
     settings = settings or {}
@@ -83,7 +78,7 @@ def load(dest: Path, settings: dict | None = None) -> list[Talk]:
         except (OSError, json.JSONDecodeError) as err:
             raise TalkError(f"{path}: {err}") from None
         rel = str(path.parent.relative_to(dest))
-        access = _defaults(settings, data.get("group", ""))
+        access = defaults(settings, data.get("group", ""), DEFAULTS)
         access.update({k: data[k] for k in ACCESS_FIELDS if data.get(k) not in (None, "")})
         keywords = {
             "title": data.get("title") or rel,

@@ -75,7 +75,7 @@ def test_top_htaccess(tmp_path):
     tgt = Target(name="w", environment="w", allow_files=True)
     text = deploy.top_htaccess(tgt, files).read_text()
     assert 'AddType "text/plain; charset=utf-8" .org' in text
-    assert '<FilesMatch "\\.(css|html|pdf)$">' in text
+    assert '<FilesMatch "^[^.].*\\.(css|html|pdf)$">' in text
     assert "Require all granted" in text and "Allow from all" in text
     tgt.org_type, tgt.allow_files = "", False
     assert deploy.top_htaccess(tgt, files) is None and not (files / ".htaccess").exists()

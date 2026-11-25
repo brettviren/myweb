@@ -7,7 +7,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import access, export, hugo, orgsource, siteindex, talkpages, version as versioning
+from . import access, artifacts, export, hugo, orgsource, siteindex, talkpages, version as versioning
 from .config import Config, Target, xdg_dir
 from .site import bundles
 
@@ -99,9 +99,17 @@ def talk_files(cfg: Config, plan: hugo.Plan, stage: Path) -> list[str]:
     return warnings
 
 
+def artifact_files(plan: hugo.Plan, stage: Path) -> list[str]:
+    """Copy each included artifact's tree to its place.  Return warnings."""
+    warnings = []
+    for art in plan.artifacts:
+        warnings += artifacts.copy(art, stage / art.url_path)
+    return warnings
+
+
 def verify(cfg: Config, target: Target, plan: hugo.Plan, stage: Path) -> None:
     """Fail if anything excluded from this target nevertheless got built."""
-    leaks = [b.name for b, _ in [*plan.excluded, *plan.talks_excluded] if (stage / b.url_path).exists()]
+    leaks = [b.name for b, _ in plan.all_excluded if (stage / b.url_path).exists()]
     if leaks:
         raise DeployError(f"excluded pages leaked into {target.name}: {', '.join(leaks)}")
     if plan.protected and not target.auth:
@@ -189,7 +197,7 @@ def build(cfg: Config, target: Target, drafts: bool = False, do_export: bool = T
     stage = stage_dir(target)
     log = hugo.build(cfg, plan, stage, drafts=drafts)
     sources(target, plan, stage)
-    warnings = talk_files(cfg, plan, stage)
+    warnings = talk_files(cfg, plan, stage) + artifact_files(plan, stage)
     protect(target, plan, stage)
     siteindex.write(target, plan, stage)
     extra_files(target, stage)

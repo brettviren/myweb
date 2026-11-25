@@ -75,6 +75,16 @@ def resolve(stage: Path, page: Path, base_path: str, link: str) -> Path | None:
     return target
 
 
+def kept(stage: Path, path: Path, target: Target) -> bool:
+    """True if PATH is in one of the target's kept areas (eg tmp/), which
+    other tools fill at the destination, so no build holds."""
+    try:
+        rel = path.relative_to(stage).as_posix()
+    except ValueError:
+        return False
+    return any(rel == k.strip("/") or rel.startswith(k.strip("/") + "/") for k in target.keep)
+
+
 def check(cfg: Config, bundle: Bundle, target: Target) -> Report:
     report = Report(bundle)
     meta = bundle.meta()
@@ -101,6 +111,7 @@ def check(cfg: Config, bundle: Bundle, target: Target) -> Report:
         log = hugo.build(cfg, plan, stage, drafts=True)
         deploy.sources(target, plan, stage)
         deploy.talk_files(cfg, plan, stage)
+        deploy.artifact_files(plan, stage)
     except (hugo.HugoError, deploy.DeployError) as err:
         report.errors.append(f"build failed: {err}")
         return report
@@ -114,7 +125,7 @@ def check(cfg: Config, bundle: Bundle, target: Target) -> Report:
     for page in sorted(pagedir.rglob("*.html")):
         for link in links(page.read_text(errors="replace")):
             path = resolve(stage, page, base_path, link)
-            if path is not None and not path.exists():
+            if path is not None and not path.exists() and not kept(stage, path, target):
                 report.errors.append(f"broken link in {page.relative_to(stage)}: {link}")
     report.notes.append(f"built to {pagedir}")
     return report

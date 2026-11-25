@@ -11,7 +11,8 @@ build it writes an extra hugo config that:
 - sets, via cascade, each bundle's "source" param to the name its org
   source is published under, for the theme to link;
 - mounts the talks the target gets, written by talkpages.py, as
-  content/talks.
+  content/talks, and the listing pages of its artifacts (artifacts.py) as
+  content/artifacts.
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import access, orgmeta, talkpages
+from . import access, artifacts, orgmeta, talkpages
 from .config import Config, Target, xdg_dir
 from .site import Bundle, bundles
 
@@ -48,6 +49,9 @@ class Plan:
     #: Talks, which share meta, realm and hidden with bundles.
     talks: list[talkpages.Talk] = field(default_factory=list)
     talks_excluded: list[tuple[talkpages.Talk, str]] = field(default_factory=list)
+    #: Artifacts, likewise, copied verbatim rather than rendered.
+    artifacts: list[artifacts.Artifact] = field(default_factory=list)
+    artifacts_excluded: list[tuple[artifacts.Artifact, str]] = field(default_factory=list)
 
     @property
     def protected(self) -> list:
@@ -56,8 +60,12 @@ class Plan:
 
     @property
     def pages(self) -> list:
-        """Every included page: bundles then talks."""
-        return [*self.included, *self.talks]
+        """Every included page: bundles, talks, then artifacts."""
+        return [*self.included, *self.talks, *self.artifacts]
+
+    @property
+    def all_excluded(self) -> list:
+        return [*self.excluded, *self.talks_excluded, *self.artifacts_excluded]
 
 
 def _why_not(target: Target, meta: orgmeta.Meta, drafts: bool) -> str:
@@ -88,6 +96,12 @@ def plan(cfg: Config, target: Target, drafts: bool = False, use: str = "build") 
             continue
         result.talks.append(talk)
         _admit(result, talk, talk.meta)
+    for art in artifacts.load(artifacts.source_dir(cfg.site, cfg.artifacts), cfg.artifacts):
+        if why := _why_not(target, art.meta, drafts):
+            result.artifacts_excluded.append((art, why))
+            continue
+        result.artifacts.append(art)
+        _admit(result, art, art.meta)
     return result
 
 
@@ -120,6 +134,12 @@ def config_text(p: Plan) -> str:
             f'target = "content/{talkpages.SECTION}"',
             "",
         ]
+    lines += [
+        "[[module.mounts]]",
+        f"source = {_q(str(artifacts_dir(p)))}",
+        f'target = "content/{artifacts.SECTION}"',
+        "",
+    ]
     hidden = {b.name: vis for b, vis in p.hidden}
     for bundle in p.included:
         lines.append("[[cascade]]")
@@ -144,9 +164,14 @@ def talks_dir(p: Plan) -> Path:
     return xdg_dir("cache") / "talks" / _key(p)
 
 
+def artifacts_dir(p: Plan) -> Path:
+    return xdg_dir("cache") / "artifacts" / _key(p)
+
+
 def write_config(p: Plan) -> Path:
-    """Write the extra hugo config, and the talks it mounts."""
+    """Write the extra hugo config, and the talks and artifacts it mounts."""
     talkpages.write(p.talks, talks_dir(p))
+    artifacts.write(p.artifacts, artifacts_dir(p))
     path = xdg_dir("cache") / "hugo" / f"{_key(p)}.toml"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(config_text(p))

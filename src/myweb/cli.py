@@ -16,6 +16,7 @@ import click
 from . import (
     __version__,
     agenda,
+    artifacts as artifacting,
     authoring,
     check as checking,
     deploy,
@@ -43,6 +44,7 @@ ERRORS = (
     siteindex.SearchError,
     talking.TalksError,
     talkpages.TalkError,
+    artifacting.ArtifactError,
     vcs.VcsError,
     FileExistsError,
 )
