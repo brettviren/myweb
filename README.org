@@ -21,6 +21,15 @@ design.
       *.svg, *.png, ...     resources, linked relatively
 #+end_example
 
+The home page is ~content/_index.md~ plus the theme's ~home.html~: the
+photo from ~about/me~, the ~[[params.contact]]~ list of
+~config/_default/hugo.toml~, the projects and experiments, and recent
+pages.  The ~projects~ and ~experiments~ taxa hold hand-written pages; their
+sections cascade ~type = "catalog"~, whose page layout lists, per
+taxonomy, the pages with a term (tag, talk group, topic) equal to the
+page's slug or one of its ~terms~ (in org: ~#+hugo_custom_front_matter:
+:terms (wct larsoft)~).  Unlisted and protected pages are never listed.
+
 Item metadata is in org keywords: ~#+title~, ~#+date~, ~#+hugo_tags~ (or
 ~#+tags[]~), ~#+hugo_draft~ (or ~#+draft~), and:
 
