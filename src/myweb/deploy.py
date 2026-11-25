@@ -62,9 +62,22 @@ def sources(target: Target, plan: hugo.Plan, stage: Path) -> list[Path]:
         path = page / bundle.source_name
         path.write_text(orgsource.publishable(bundle.source.read_text()))
         out.append(path)
-    if target.org_type:
-        (stage / ".htaccess").write_text(ORG_TYPE.format(type=target.org_type))
     return out
+
+
+def top_htaccess(target: Target, stage: Path) -> Path | None:
+    """Write the top .htaccess: the org media type and granted file types."""
+    parts = []
+    if target.org_type:
+        parts.append(ORG_TYPE.format(type=target.org_type))
+    if target.allow_files and (types := access.file_types(stage)):
+        parts.append(access.grant(types))
+    path = stage / ".htaccess"
+    if not parts:
+        path.unlink(missing_ok=True)
+        return None
+    path.write_text("\n".join(parts))
+    return path
 
 
 def talk_files(cfg: Config, plan: hugo.Plan, stage: Path) -> list[str]:
@@ -180,6 +193,7 @@ def build(cfg: Config, target: Target, drafts: bool = False, do_export: bool = T
     protect(target, plan, stage)
     siteindex.write(target, plan, stage)
     extra_files(target, stage)
+    top_htaccess(target, stage)
     verify(cfg, target, plan, stage)
     return Result(target, stage, plan, exported=exported, log=log, warnings=warnings)
 

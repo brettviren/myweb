@@ -147,6 +147,11 @@ stage by each method the target sets, in this order:
   ~~/.cache/myweb/deploy/<target>~ follows the remote branch.
 
 Paths in ~keep~ (default ~drop/~) are never deleted at any destination.
+A server that admits only some file types (eg hierocles, only ~.html~)
+needs ~allow_files = true~: the top ~.htaccess~ then grants, by
+~FilesMatch~, every file type in the build.  Because ~Files~ sections
+merge after directories, every protected ~.htaccess~ repeats its
+~Require~ in a ~FilesMatch~ so the grant can not open protected files.
 Extra ~files~ are written at the top of the build.
 
 The built stage holds plain files, talk PDFs copied out of the annex, so

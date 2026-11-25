@@ -68,3 +68,21 @@ def test_ship_needs_somewhere(tmp_path):
     result = deploy.Result(tgt, tmp_path, plan=None)
     with pytest.raises(deploy.DeployError):
         deploy.ship(None, result)
+
+
+def test_top_htaccess(tmp_path):
+    files = stage(tmp_path, {"index.html": "", "css/s.css": "", "t/a.pdf": "", ".nojekyll": "", "x/.htaccess": ""})
+    tgt = Target(name="w", environment="w", allow_files=True)
+    text = deploy.top_htaccess(tgt, files).read_text()
+    assert 'AddType "text/plain; charset=utf-8" .org' in text
+    assert '<FilesMatch "\\.(css|html|pdf)$">' in text
+    tgt.org_type, tgt.allow_files = "", False
+    assert deploy.top_htaccess(tgt, files) is None and not (files / ".htaccess").exists()
+
+
+def test_protected_htaccess_requires_files_too():
+    from myweb import access
+    tgt = Target(name="w", environment="w", htpasswd="/srv/pw")
+    text = access.htaccess(tgt, access.Realm("edg", "user edg"), "page x")
+    assert text.count("Require user edg") == 2
+    assert '<FilesMatch "">' in text

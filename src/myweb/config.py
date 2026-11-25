@@ -90,6 +90,9 @@ class Target:
     #: Media type for published org sources, set by a top .htaccess
     #: (needs AllowOverride FileInfo).  Empty to write none.
     org_type: str = "text/plain; charset=utf-8"
+    #: Grant, by a top .htaccess, every file type in the build, for a
+    #: server that denies all but some types (eg .html) by default.
+    allow_files: bool = False
     #: Access realm name to its Apache "Require" argument.  A protected
     #: page is in the realm its #+access names, default "protected".
     realms: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_REALMS))
@@ -198,6 +201,7 @@ def _target(name: str, cfg: dict) -> Target:
             raise ConfigError(f"target {name}: file {path!r} must be relative to the site top")
     tgt.base_url = str(cfg.get("base_url", ""))
     tgt.org_type = str(cfg.get("org_type", tgt.org_type))
+    tgt.allow_files = bool(cfg.get("allow_files", tgt.allow_files))
     if "realms" in cfg:
         tgt.realms = {str(k): str(v) for k, v in cfg["realms"].items()}
     for realm, require in tgt.realms.items():

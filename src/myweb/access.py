@@ -19,6 +19,7 @@ URL is what unlisted means.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -33,6 +34,17 @@ AuthType Basic
 AuthName "{realm}"
 AuthUserFile {htpasswd}
 Require {require}
+# Files sections merge after directories, so a FilesMatch granting file
+# types higher up (see grant) would otherwise override the Require above.
+<FilesMatch "">
+  Require {require}
+</FilesMatch>
+"""
+
+GRANT = """# Written by myweb: the server admits only some file types; admit these.
+<FilesMatch "\\.({types})$">
+  Require all granted
+</FilesMatch>
 """
 
 
@@ -72,3 +84,14 @@ def htaccess(target: Target, realm: Realm, what: str) -> str:
         what=what, realm=realm.name, require=realm.require,
         htpasswd=Path(target.htpasswd).expanduser(),
     )
+
+
+def grant(types: list[str]) -> str:
+    """Top .htaccess text admitting files of the TYPES (extensions)."""
+    return GRANT.format(types="|".join(re.escape(t) for t in sorted(set(types))))
+
+
+def file_types(root: Path) -> list[str]:
+    """The extensions of the non-hidden files under ROOT."""
+    return sorted({p.suffix[1:] for p in root.rglob("*")
+                   if p.is_file() and p.suffix and not p.name.startswith(".")})
