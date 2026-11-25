@@ -4,7 +4,7 @@ import pytest
 
 from conftest import add_post, git
 from myweb import authoring, hugo, setup, version
-from myweb.config import ConfigError
+from myweb.config import ConfigError, load
 from myweb.site import bundles, find, slugify
 
 
@@ -107,3 +107,15 @@ def test_plan_uses_own_config(cfg):
     paths = {use: hugo.write_config(hugo.plan(cfg, tgt, use=use)) for use in ("build", "check", "server")}
     assert len(set(paths.values())) == 3
     assert paths["build"].name == "personal.toml"
+
+
+def test_emacsclient_command_and_edit_form(site, tmp_path):
+    from myweb import emacs
+    user = tmp_path / "config.toml"
+    user.write_text('[emacs]\nclient = "emacsclient -s /tmp/emacs1001/sticky"\nload_path = ["/x/ox-hugo"]\n')
+    cfg = load(user, site=site)
+    assert cfg.emacsclient == ["emacsclient", "-s", "/tmp/emacs1001/sticky"]
+    form = emacs.edit_form(cfg, site / "content" / "posts" / "a" / "a.org")
+    assert "(add-to-list 'load-path d t)" in form and '"/x/ox-hugo"' in form
+    cfg.emacsclient = ["false"]
+    assert emacs.edit(cfg, site / "a.org")[1]

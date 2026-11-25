@@ -104,7 +104,8 @@ class Config:
     hugo: list[str] = field(default_factory=lambda: list(DEFAULT_HUGO))
     emacs: str = "emacs"
     emacs_load_path: list[Path] = field(default_factory=list)
-    emacsclient: str = "emacsclient"
+    #: The emacsclient command, eg ["emacsclient", "-s", "/tmp/emacs1001/sticky"].
+    emacsclient: list[str] = field(default_factory=lambda: ["emacsclient"])
     #: How drafts with a deadline reach org-agenda: "emacsclient" or "none".
     agenda: str = "emacsclient"
     search: list[str] = field(default_factory=lambda: ["orgface", "search"])
@@ -243,7 +244,8 @@ def load(
         cfg.hugo = _command(user["hugo"])
     emacs = user.get("emacs", {})
     cfg.emacs = emacs.get("command", cfg.emacs)
-    cfg.emacsclient = emacs.get("client", cfg.emacsclient)
+    if "client" in emacs:
+        cfg.emacsclient = _command(emacs["client"])
     cfg.emacs_load_path = [
         expand(p) for p in emacs.get("load_path", DEFAULT_EMACS_LOAD_PATH)
     ]

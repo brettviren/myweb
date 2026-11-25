@@ -19,6 +19,7 @@ from . import (
     authoring,
     check as checking,
     deploy,
+    emacs,
     export as exporting,
     hugo,
     server,
@@ -123,15 +124,12 @@ def edit(cfg: Config, item, no_browser):
         url = server.ensure(cfg) + bundle.url_path
     except ERRORS as err:
         fail(err)
-    elisp = exporting.elisp_file()
-    form = (
-        f'(progn (find-file "{bundle.source}") (when (require \'ox-hugo nil t)'
-        f' (load "{elisp}" nil t) (when (fboundp \'org-hugo-auto-export-mode)'
-        " (org-hugo-auto-export-mode 1))) t)"
-    )
-    proc = subprocess.run([cfg.emacsclient, "-n", "--eval", form], capture_output=True)
-    if proc.returncode:
-        click.echo(f"emacsclient failed, edit {bundle.source} yourself", err=True)
+    what, why = emacs.edit(cfg, bundle.source)
+    if why:
+        click.echo(f"emacsclient failed ({why}), edit {bundle.source} yourself", err=True)
+    elif what == '"no ox-hugo"':
+        click.echo("note: no ox-hugo in that Emacs, so saving does not re-export"
+                   " (myweb deploy will)", err=True)
     click.echo(url)
     if not no_browser:
         subprocess.Popen([cfg.browser, url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

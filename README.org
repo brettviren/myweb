@@ -227,7 +227,10 @@ site's ~myweb.toml~.  ~MYWEB_SITE~, ~MYWEB_HUGO~ and ~MYWEB_CONFIG~ override.
 
 Load ~src/myweb/myweb.el~ in Emacs so interactive ox-hugo exports (eg
 ~org-hugo-auto-export-mode~) keep bundle links relative, as ~myweb export~
-does.  ~myweb edit~ loads it for you.
+does.  ~myweb edit~ loads it for you, in the Emacs that ~[emacs] client~
+reaches (a command; name a daemon's socket in full, eg ~["emacsclient",
+"-s", "/tmp/emacs1001/sticky"]~), appending ~load_path~ so that Emacs
+finds ox-hugo but keeps its own org.  A daemon with no frame gets one.
 
 * Development
 
