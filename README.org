@@ -134,6 +134,20 @@ Access: a talk's ~audience~, ~visibility~ and ~access~ come from its
 ~[talks.group.<name>]~), and are handled as for articles.  ~migrate
 --redo~ keeps them.
 
+Working on talks in the dataset (TALK is ~group/YYYY/MM/DD/topic~, its topic
+alone if unique, or a path):
+
+#+begin_example
+myweb talks new <group> "Title" [-t topic] [-d YYYY-MM-DD]  # org-beamer + draft talk.json
+myweb talks edit TALK
+myweb talks refresh TALK [--publish] [--save]   # talk.json from org title and PDF
+myweb talks pull TALK [--from DIR] [--save]     # changes made in the old tree since
+#+end_example
+
+~pull~ migrates the talk again from the old tree, from ~DIR~ if it moved
+there, keeping its review and talk.json settings; a new group moves it.
+~[talks] setupfile~ names the ~#+setupfile~ of new talks.
+
 Resolving ~MIGRATION.org~:
 
 #+begin_example
