@@ -95,7 +95,7 @@ def check(cfg: Config, bundle: Bundle, target: Target) -> Report:
         report.errors.append(f"export failed: {err}")
         return report
 
-    plan = hugo.plan(cfg, target, drafts=True)
+    plan = hugo.plan(cfg, target, drafts=True, use="check")
     stage = xdg_dir("cache") / "check" / target.name
     try:
         log = hugo.build(cfg, plan, stage, drafts=True)

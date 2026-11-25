@@ -21,7 +21,7 @@ def ensure(cfg: Config, target_name: str = "local") -> str:
     url = f"http://localhost:{port}/"
     if running(port):
         return url
-    plan = hugo.plan(cfg, cfg.target(target_name), drafts=True)
+    plan = hugo.plan(cfg, cfg.target(target_name), drafts=True, use="server")
     logfile = xdg_dir("state") / "server.log"
     logfile.parent.mkdir(parents=True, exist_ok=True)
     with open(logfile, "ab") as log:

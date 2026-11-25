@@ -99,3 +99,11 @@ def test_bundles_skips_dirs_without_source(cfg):
     add_post(cfg, "ok")
     (cfg.taxa["posts"].source / "empty").mkdir()
     assert [b.slug for b in bundles(cfg)] == ["ok"]
+
+
+def test_plan_uses_own_config(cfg):
+    from myweb import hugo
+    tgt = cfg.target("personal")
+    paths = {use: hugo.write_config(hugo.plan(cfg, tgt, use=use)) for use in ("build", "check", "server")}
+    assert len(set(paths.values())) == 3
+    assert paths["build"].name == "personal.toml"

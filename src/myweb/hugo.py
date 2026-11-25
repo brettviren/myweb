@@ -35,6 +35,10 @@ class Plan:
     """What one target gets."""
 
     target: Target
+    #: What the plan is for: "build", "check" or "server".  Each use has its
+    #: own generated config and talks, since a running hugo server watches
+    #: its config and a rewrite mid-build deadlocks it on the build lock.
+    use: str = "build"
     included: list[Bundle] = field(default_factory=list)
     excluded: list[tuple[Bundle, str]] = field(default_factory=list)
     hidden: list[tuple[Bundle, str]] = field(default_factory=list)
@@ -69,8 +73,8 @@ def _why_not(target: Target, meta: orgmeta.Meta, drafts: bool) -> str:
     return ""
 
 
-def plan(cfg: Config, target: Target, drafts: bool = False) -> Plan:
-    result = Plan(target)
+def plan(cfg: Config, target: Target, drafts: bool = False, use: str = "build") -> Plan:
+    result = Plan(target, use)
     for bundle in bundles(cfg):
         meta = bundle.meta()
         if why := _why_not(target, meta, drafts):
@@ -132,14 +136,18 @@ def config_text(p: Plan) -> str:
     return "\n".join(lines)
 
 
+def _key(p: Plan) -> str:
+    return p.target.name if p.use == "build" else f"{p.target.name}-{p.use}"
+
+
 def talks_dir(p: Plan) -> Path:
-    return xdg_dir("cache") / "talks" / p.target.name
+    return xdg_dir("cache") / "talks" / _key(p)
 
 
 def write_config(p: Plan) -> Path:
     """Write the extra hugo config, and the talks it mounts."""
     talkpages.write(p.talks, talks_dir(p))
-    path = xdg_dir("cache") / "hugo" / f"{p.target.name}.toml"
+    path = xdg_dir("cache") / "hugo" / f"{_key(p)}.toml"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(config_text(p))
     return path
