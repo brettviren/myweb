@@ -30,6 +30,7 @@ from . import (
     status as statusing,
     talkpages,
     talks as talking,
+    talkwork as talkworking,
     vcs,
     version as versioning,
 )
@@ -44,6 +45,7 @@ ERRORS = (
     siteindex.SearchError,
     talking.TalksError,
     talkpages.TalkError,
+    talkworking.TalkWorkError,
     artifacting.ArtifactError,
     vcs.VcsError,
     FileExistsError,
@@ -379,7 +381,11 @@ def setup(cfg: Config, method, target_name, when, just_print, force, unitdir):
 
 @cli.group(no_args_is_help=True)
 def talks():
-    """Migrate talks from the old talks tree to the talks dataset.
+    """Make talks in the talks dataset, and migrate them from the old tree.
+
+    "new" starts a talk, "edit" opens it, "refresh" updates its talk.json
+    from its PDF (and --publish puts it on the site), "pull" brings in
+    changes made to a migrated talk in the old tree.
 
     "scan" finds talk candidates and writes a digest of each needing a
     review.  A review, migration/reviews/<id>.json, is written by reading
@@ -407,6 +413,84 @@ def _talks_load(state: talking.State) -> dict:
 
 def _talks_report(state: talking.State, inv: dict) -> None:
     talking.write_report(state, inv)
+
+
+@talks.command("new", no_args_is_help=True)
+@click.argument("group")
+@click.argument("title")
+@click.option("-t", "--topic", default="", help="Directory name, default made from the title.")
+@click.option("-d", "--date", "when", callback=_date, help="YYYY-MM-DD, default today.")
+@click.option("--no-edit", is_flag=True, help="Do not open it in Emacs.")
+@pass_config
+def talks_new(cfg: Config, group, title, topic, when, no_edit):
+    """Start a talk in GROUP titled TITLE: an org-beamer source and a draft talk.json."""
+    try:
+        talk = talkworking.new(cfg.talks_dest, group, title, topic, when,
+                               cfg.talks.get("setupfile", talkworking.SETUPFILE))
+    except ERRORS as err:
+        fail(err)
+    click.echo(talk)
+    if not no_edit:
+        _talk_edit(cfg, talk)
+
+
+def _talk_edit(cfg: Config, talk: Path) -> None:
+    src = talkworking.source(talk)
+    _, why = emacs.edit(cfg, src)
+    if why:
+        click.echo(f"emacsclient failed ({why}), edit {src} yourself", err=True)
+
+
+@talks.command("edit", no_args_is_help=True)
+@click.argument("talk")
+@pass_config
+def talks_edit(cfg: Config, talk):
+    """Open TALK's source in Emacs.  TALK is group/YYYY/MM/DD/topic, its topic or a path."""
+    try:
+        _talk_edit(cfg, talkworking.find(cfg.talks_dest, talk))
+    except ERRORS as err:
+        fail(err)
+
+
+@talks.command("refresh", no_args_is_help=True)
+@click.argument("talk")
+@click.option("-p", "--publish", is_flag=True, help="Also clear its draft flag, so builds include it.")
+@click.option("--save", is_flag=True, help="datalad save the talks dataset afterwards.")
+@pass_config
+def talks_refresh(cfg: Config, talk, publish, save):
+    """Update TALK's talk.json from its org title and its (rebuilt) PDF."""
+    try:
+        path = talkworking.find(cfg.talks_dest, talk)
+        data, warnings = talkworking.refresh(path, publish)
+        for line in warnings:
+            click.echo(f"warning: {line}", err=True)
+        state = "draft" if data.get("draft") else "published"
+        click.echo(f"{path.relative_to(cfg.talks_dest)}: {data['title']}, {data.get('pages', 0)} pages, {state}")
+        if save:
+            vcs.save(cfg.talks_dest, f"talks: {path.relative_to(cfg.talks_dest)}")
+    except ERRORS as err:
+        fail(err)
+
+
+@talks.command("pull", no_args_is_help=True)
+@click.argument("talk")
+@click.option("-f", "--from", "src", type=click.Path(exists=True, file_okay=False, path_type=Path),
+              help="Where the talk is now in the old tree, if it moved.")
+@click.option("--save", is_flag=True, help="datalad save the talks dataset afterwards.")
+@pass_config
+def talks_pull(cfg: Config, talk, src, save):
+    """Bring in changes made to migrated TALK in the old talks tree."""
+    try:
+        state = _talks_state(cfg)
+        _talks_load(state)
+        path = talkworking.find(cfg.talks_dest, talk)
+        cid, place = talkworking.pull(state, cfg.talks_source, path, src)
+        _talks_report(state, state.load())
+        click.echo(f"pulled {cid} -> {place}")
+        if save:
+            vcs.save(cfg.talks_dest, f"talks: pull {cid} into {place}")
+    except ERRORS as err:
+        fail(err)
 
 
 @talks.command("scan")

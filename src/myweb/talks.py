@@ -723,6 +723,8 @@ def resolve(state: State, inv: dict, cid: str, action: str | None, note: str = "
     elif action:
         review["resolution"] = action
         review["resolution_note"] = note
+        if action == "accept":  # as it is now, so a change since is not stale
+            review["fingerprint"] = entry["candidate"]["fingerprint"]
     if date_:
         review["date"] = parse_loose_date(date_)
     if topic:
