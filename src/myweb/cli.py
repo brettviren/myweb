@@ -20,7 +20,7 @@ from . import (
     authoring,
     check as checking,
     deploy,
-    emacs,
+    editor as editing,
     export as exporting,
     hugo,
     server,
@@ -45,6 +45,7 @@ ERRORS = (
     siteindex.SearchError,
     talking.TalksError,
     talkpages.TalkError,
+    editing.EditorError,
     talkworking.TalkWorkError,
     artifacting.ArtifactError,
     vcs.VcsError,
@@ -118,25 +119,30 @@ def new(cfg: Config, taxon, title, tags, deadline, message, slug):
 @click.option("--no-browser", is_flag=True, help="Do not open a browser.")
 @pass_config
 def edit(cfg: Config, item, no_browser):
-    """Open ITEM in Emacs with a drafts-included hugo server previewing it.
+    """Edit ITEM with a drafts-included hugo server previewing it.
 
-    ITEM is a slug, taxon/slug or a path.  In Emacs, ox-hugo items are
-    re-exported on each save by org-hugo-auto-export-mode.
+    ITEM is a slug, taxon/slug or a path.  The editor is "editor" of the
+    config, else $EDITOR, else $VISUAL.  If that is emacsclient, the item
+    opens in the running Emacs and re-exports on each save; any other
+    editor is waited for, then the item is exported.
     """
     try:
         bundle = sites.find(cfg, item)
         url = server.ensure(cfg) + bundle.url_path
     except ERRORS as err:
         fail(err)
-    what, why = emacs.edit(cfg, bundle.source)
-    if why:
-        click.echo(f"emacsclient failed ({why}), edit {bundle.source} yourself", err=True)
-    elif what == '"no ox-hugo"':
-        click.echo("note: no ox-hugo in that Emacs, so saving does not re-export"
-                   " (myweb deploy will)", err=True)
     click.echo(url)
     if not no_browser:
         subprocess.Popen([cfg.browser, url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        live, note = editing.open_live(cfg, bundle.source)
+        if note:
+            click.echo(f"note: {note}", err=True)
+        if not live and not note:
+            for done in exporting.export(cfg, [bundle]):
+                click.echo(f"exported {done.name}")
+    except ERRORS as err:
+        fail(err)
 
 
 @cli.command()
@@ -435,10 +441,11 @@ def talks_new(cfg: Config, group, title, topic, when, no_edit):
 
 
 def _talk_edit(cfg: Config, talk: Path) -> None:
+    """Edit the talk's source with the user's editor (see "myweb edit")."""
     src = talkworking.source(talk)
-    _, why = emacs.edit(cfg, src)
-    if why:
-        click.echo(f"emacsclient failed ({why}), edit {src} yourself", err=True)
+    _, note = editing.open_live(cfg, src)
+    if note:
+        click.echo(f"note: {note}, edit {src} yourself", err=True)
 
 
 @talks.command("edit", no_args_is_help=True)
@@ -480,22 +487,46 @@ def talks_refresh(cfg: Config, talk, publish, save):
 @click.option("-k", "--keyword", "keywords", multiple=True, help="A keyword, may repeat; replaces them all.")
 @click.option("--venue", help="Where it was given.")
 @click.option("--url", "event_url", help="The event's web page.")
+@click.option("-e", "--edit", "use_editor", is_flag=True, help="Edit all of them as text in your editor.")
 @click.option("--save", is_flag=True, help="datalad save the talks dataset afterwards.")
 @pass_config
-def talks_describe(cfg: Config, talk, summary, title, subtitle, keywords, venue, event_url, save):
+def talks_describe(cfg: Config, talk, summary, title, subtitle, keywords, venue, event_url, use_editor, save):
     """Set TALK's summary, title, keywords, venue or event URL.
 
-    For a migrated talk they also go in its review, so migrating it again
-    (or "pull") keeps them.
+    With -e, edit them all, set or not, as text in your editor ("editor" of
+    the config, else $EDITOR, else $VISUAL).  For a migrated talk they also
+    go in its review, so migrating it again (or "pull") keeps them.
     """
     if summary == "-":
         summary = sys.stdin.read().strip()
     fields = dict(summary=summary, title=title, subtitle=subtitle, venue=venue, event_url=event_url,
                   keywords=list(keywords) if keywords else None)
-    if all(v is None for v in fields.values()):
-        fail(ConfigError("give at least one of --summary, --title, --subtitle, --keyword, --venue, --url"))
+    given = any(v is not None for v in fields.values())
+    if use_editor and given:
+        fail(ConfigError("give -e or field options, not both"))
+    if not (use_editor or given):
+        fail(ConfigError("give -e or at least one of --summary, --title, --subtitle, --keyword, --venue, --url"))
     try:
         path = talkworking.find(cfg.talks_dest, talk)
+        if use_editor:
+            text = talkworking.description_text(path, cfg.talks_dest)
+            while True:
+                out = editing.edit_text(cfg, text)
+                if out is None:
+                    click.echo("unchanged")
+                    return
+                try:
+                    fields = talkworking.changes(path, talkworking.parse_description(out))
+                    break
+                except talkworking.TalkWorkError as err:
+                    click.echo(f"myweb: {err}", err=True)
+                    if not click.confirm("edit again?", default=True):
+                        sys.exit(1)
+                    text = out
+            if not fields:
+                click.echo("unchanged")
+                return
+            click.echo("setting " + ", ".join(sorted(fields)))
         for where in talkworking.describe(cfg.talks_dest, path, **fields):
             click.echo(f"wrote {where}")
         if save:

@@ -240,3 +240,65 @@ def describe(dest: Path, talk: Path, **fields) -> list[str]:
             path.write_text(json.dumps(review, indent=1, ensure_ascii=False) + "\n")
             out.append(str(path))
     return out
+
+
+#: The one-line fields of a description text, by their label there.
+TEXT_FIELDS = (("title", "title"), ("subtitle", "subtitle"), ("venue", "venue"),
+               ("url", "event_url"), ("keywords", "keywords"))
+TEXT_HELP = """\
+# Describe the talk {place}.
+# Edit the values after each "name:".  An empty value clears it.
+# keywords are separated by commas.  The summary is every line after
+# "summary:", a few sentences for listings and search.
+# Lines starting with # are ignored.  Save and quit to apply.
+"""
+
+
+def description_text(talk: Path, dest: Path) -> str:
+    """The talk's description as text to edit, every field shown."""
+    data = read(talk)
+    lines = [TEXT_HELP.format(place=talk.resolve().relative_to(dest.resolve()).as_posix())]
+    for label, key in TEXT_FIELDS:
+        val = data.get(key) or ""
+        if key == "keywords":
+            val = ", ".join(val)
+        lines.append(f"{label}: {val}".rstrip())
+    lines += ["", "summary:", (data.get("summary") or "").strip(), ""]
+    return "\n".join(lines)
+
+
+def parse_description(text: str) -> dict:
+    """The fields of a description text, all of them, "" or [] if empty."""
+    labels = dict(TEXT_FIELDS)
+    out: dict = {}
+    summary: list[str] | None = None
+    for line in text.splitlines():
+        if line.startswith("#"):
+            continue
+        if summary is not None:
+            summary.append(line)
+            continue
+        if not line.strip():
+            continue
+        label, sep, val = line.partition(":")
+        label = label.strip().lower()
+        if not sep or (label not in labels and label != "summary"):
+            raise TalkWorkError(f"not a field: {line!r}; expected one of "
+                                + ", ".join([*labels, "summary"]))
+        if label == "summary":
+            summary = [val.strip()] if val.strip() else []
+            continue
+        key = labels[label]
+        out[key] = [k.strip() for k in val.split(",") if k.strip()] if key == "keywords" else val.strip()
+    for _, key in TEXT_FIELDS:
+        out.setdefault(key, [] if key == "keywords" else "")
+    # Paragraphs keep their breaks, lines within one are joined.
+    paras = "\n".join(summary or []).strip().split("\n\n")
+    out["summary"] = "\n\n".join(" ".join(p.split()) for p in paras if p.strip())
+    return out
+
+
+def changes(talk: Path, fields: dict) -> dict:
+    """Those of FIELDS that differ from the talk's."""
+    data = read(talk)
+    return {k: v for k, v in fields.items() if (data.get(k) or type(v)()) != v}

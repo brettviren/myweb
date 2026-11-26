@@ -141,7 +141,7 @@ alone if unique, or a path):
 myweb talks new <group> "Title" [-t topic] [-d YYYY-MM-DD]  # org-beamer + draft talk.json
 myweb talks edit TALK
 myweb talks refresh TALK [--publish] [--save]   # talk.json from org title and PDF
-myweb talks describe TALK [-s SUMMARY|-] [--title T] [-k KW]... [--venue V] [--save]
+myweb talks describe TALK -e | [-s SUMMARY|-] [--title T] [-k KW]... [--venue V] [--save]
 myweb talks pull TALK [--from DIR] [--save]     # changes made in the old tree since
 #+end_example
 
@@ -272,6 +272,11 @@ the stamps.
 ~~/.config/myweb/config.toml~ holds host specifics (site path, hugo and
 Emacs commands) and may override any ~[taxon.X]~ or ~[target.X]~ field of the
 site's ~myweb.toml~.  ~MYWEB_SITE~, ~MYWEB_HUGO~ and ~MYWEB_CONFIG~ override.
+
+~myweb edit~, ~talks edit~ and ~talks describe -e~ run ~editor~ of the
+config, else ~$EDITOR~, else ~$VISUAL~, and wait for it; ~edit~ then exports
+the item.  An editor that is ~emacsclient~ instead gets the item in the
+running Emacs, re-exported on each save (below).
 
 Load ~src/myweb/myweb.el~ in Emacs so interactive ox-hugo exports (eg
 ~org-hugo-auto-export-mode~) keep bundle links relative, as ~myweb export~
