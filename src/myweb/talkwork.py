@@ -7,6 +7,8 @@ dataset (default ~/keep/talks) holding its sources, its PDF and a
 - ``new`` starts one: an org-beamer source and a draft talk.json.
 - ``refresh`` updates talk.json from the talk's org title and PDF, after
   the PDF is (re)built, and with ``publish`` clears its draft flag.
+- ``describe`` sets its summary, title and such, in talk.json and, for a
+  migrated talk, in its review, which migrating again writes from.
 - ``pull`` brings in a migrated talk's changes made since in the old
   talks tree, even if it moved there: it is migrated again (see talks.py)
   into its place, which follows a change of group.
@@ -209,3 +211,32 @@ def pull(state: talking.State, root: Path, talk: Path, src: Path | None = None) 
     if not done or done[0][1] != "migrated":
         raise TalkWorkError(f"{new_id}: {done[0][1] if done else 'not migrated'}")
     return new_id, new_place
+
+
+#: Text a person gives a talk, in talk.json and a migrated talk's review.
+DESCRIBED = ("title", "subtitle", "summary", "keywords", "venue", "event_url")
+
+
+def describe(dest: Path, talk: Path, **fields) -> list[str]:
+    """Set FIELDS (of DESCRIBED, None to leave) of TALK.  Return where written."""
+    fields = {k: v for k, v in fields.items() if v is not None}
+    unknown = set(fields) - set(DESCRIBED)
+    if unknown:
+        raise TalkWorkError(f"cannot describe {', '.join(sorted(unknown))}")
+    data = read(talk)
+    data.update(fields)
+    write(talk, data)
+    out = [str(talk / TALK)]
+    origin = data.get("origin")
+    if origin:
+        state = talking.State(dest)
+        inv = state.load()
+        place = talk.resolve().relative_to(dest.resolve()).as_posix()
+        if inv["talks"].get(origin, {}).get("dest") == place:
+            review = state.review(origin) or {"id": origin, "reviewed_by": "owner", "is_talk": True, "problems": []}
+            review.update(fields)
+            path = state.review_path(origin)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(review, indent=1, ensure_ascii=False) + "\n")
+            out.append(str(path))
+    return out

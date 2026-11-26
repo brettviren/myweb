@@ -472,6 +472,38 @@ def talks_refresh(cfg: Config, talk, publish, save):
         fail(err)
 
 
+@talks.command("describe", no_args_is_help=True)
+@click.argument("talk")
+@click.option("-s", "--summary", help='A few sentences for listings and search; "-" reads them from stdin.')
+@click.option("--title")
+@click.option("--subtitle")
+@click.option("-k", "--keyword", "keywords", multiple=True, help="A keyword, may repeat; replaces them all.")
+@click.option("--venue", help="Where it was given.")
+@click.option("--url", "event_url", help="The event's web page.")
+@click.option("--save", is_flag=True, help="datalad save the talks dataset afterwards.")
+@pass_config
+def talks_describe(cfg: Config, talk, summary, title, subtitle, keywords, venue, event_url, save):
+    """Set TALK's summary, title, keywords, venue or event URL.
+
+    For a migrated talk they also go in its review, so migrating it again
+    (or "pull") keeps them.
+    """
+    if summary == "-":
+        summary = sys.stdin.read().strip()
+    fields = dict(summary=summary, title=title, subtitle=subtitle, venue=venue, event_url=event_url,
+                  keywords=list(keywords) if keywords else None)
+    if all(v is None for v in fields.values()):
+        fail(ConfigError("give at least one of --summary, --title, --subtitle, --keyword, --venue, --url"))
+    try:
+        path = talkworking.find(cfg.talks_dest, talk)
+        for where in talkworking.describe(cfg.talks_dest, path, **fields):
+            click.echo(f"wrote {where}")
+        if save:
+            vcs.save(cfg.talks_dest, f"talks: describe {path.relative_to(cfg.talks_dest)}")
+    except ERRORS as err:
+        fail(err)
+
+
 @talks.command("pull", no_args_is_help=True)
 @click.argument("talk")
 @click.option("-f", "--from", "src", type=click.Path(exists=True, file_okay=False, path_type=Path),

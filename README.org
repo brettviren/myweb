@@ -141,6 +141,7 @@ alone if unique, or a path):
 myweb talks new <group> "Title" [-t topic] [-d YYYY-MM-DD]  # org-beamer + draft talk.json
 myweb talks edit TALK
 myweb talks refresh TALK [--publish] [--save]   # talk.json from org title and PDF
+myweb talks describe TALK [-s SUMMARY|-] [--title T] [-k KW]... [--venue V] [--save]
 myweb talks pull TALK [--from DIR] [--save]     # changes made in the old tree since
 #+end_example
 

@@ -91,3 +91,18 @@ def test_pull_moved(tmp_path):
     assert inv["talks"]["wire-cell/topics/phlex/geom/geom"]["moved_to"] == cid
     assert cid not in talks.needs_review(state, inv)
     assert [d for _, s, d in talks.migrate(state, old, inv) if s == "migrated"] == [where]
+
+
+def test_describe_survives_pull(tmp_path):
+    old, keep, state, src, place = _migrated(tmp_path)
+    written = talkwork.describe(keep, keep / place, summary="Mine.", keywords=["a", "b"])
+    assert len(written) == 2
+    (src / "geom.org").write_text(ORG.format(title="Geometry", text="Again."))
+    talkwork.pull(state, old, keep / place)
+    data = talkwork.read(keep / place)
+    assert data["summary"] == "Mine." and data["keywords"] == ["a", "b"]
+    # A talk that was never migrated has only its talk.json.
+    talk = talkwork.new(keep, "dune", "Fresh", when=date(2026, 12, 2), setupfile=str(tmp_path / "none.org"))
+    assert talkwork.describe(keep, talk, summary="New.") == [str(talk / "talk.json")]
+    with pytest.raises(talkwork.TalkWorkError):
+        talkwork.describe(keep, talk, pages=3)
